@@ -1,0 +1,32 @@
+http:
+  port: 5005
+  authorization: "test_auth"
+
+database: 
+  url: "postgres://drivers:drivers@localhost:5438/drivers?sslmode=disable"
+
+logging:
+  dir: "./logs" # MUST BE STRING, PATH TO SAVE LOG
+  enable: true # MUST BE BOOL.   
+  level: "DEBUG" # MUST BE STRING. Available levels: INFO, WARNING, ERROR. DEFAULT: INFO
+  format: "LOG" # MUST BE STRING. Available formats: TXT, JSON. DEFAULT: TXT
+  saving_days: 10 # MUST BE INTEGER AND MINIMAL VALUE IS 1.
+
+drivers_logs:
+  dir: "./drivers/logs" # MUST BE STRING, PATH TO SAVES LOG
+
+gitlab_token: "token"
+drivers_path: "./applications"
+drivers:
+  - name: "universal_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/universal_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Funiversal_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
+  - name: "lis_api_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/lis_api_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%lis_api_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
+  - name: "txt_result_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/txt_result_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%txt_result_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"      

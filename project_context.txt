@@ -1,0 +1,1057 @@
+==========================================
+КОНТЕКСТ ПРОЕКТА
+Сгенерировано: Sat Mar 21 23:09:32 UTC 2026
+Директория проекта: /mnt/host/d/work/Julia-app/Slavicstudy
+==========================================
+
+СТАТИСТИКА:
+- Обработано файлов: 0
+- Всего строк кода: 0
+- Размер файла: 28.0K
+==========================================
+
+==========================================
+КОНТЕКСТ ПРОЕКТА
+Сгенерировано: Sat Mar 21 23:09:31 UTC 2026
+Директория проекта: /mnt/host/d/work/Julia-app/Slavicstudy
+==========================================
+
+СТРУКТУРА ПРОЕКТА:
+------------------------------------------
+.docker/db/dbinit.sql
+app/app.go
+cmd/app/main.go
+config/config.go
+config.yaml
+db/migrations/000001_init.down.sql
+db/migrations/000001_init.up.sql
+docker-compose.yml
+internal/database/postgres.go
+internal/database/repository.go
+internal/models/courses.go
+internal/models/lessons.go
+internal/models/lesson_progress.go
+internal/models/task.go
+internal/models/users.go
+logging/config.go
+logging/consts.go
+logging/errors.go
+logging/funcs.go
+logging/logger.go
+logging/test_logger.go
+
+==========================================
+СОДЕРЖИМОЕ ФАЙЛОВ:
+==========================================
+
+
+==========================================
+ФАЙЛ: .docker/db/dbinit.sql
+==========================================
+
+
+
+==========================================
+ФАЙЛ: app/app.go
+==========================================
+
+package app
+
+import (
+	"interslavic/config"
+	"interslavic/logging"
+
+	"go.uber.org/fx"
+)
+
+func New() *fx.App {
+	return fx.New(
+
+		// base setup application
+		fx.Provide(
+			config.New,
+			logging.ProvideFXMLoggers,
+		),
+		fx.Invoke(
+			logging.InvokeBaseLogger,
+		),
+
+		// fx.Provide(
+		// 	// DB module
+		// 	database.NewPostgres,
+		// 	database.NewRepository,
+
+		// 	// Usecases module
+		// 	client.NewUseCases,
+		// 	drivers.NewUseCases,
+		// 	logs.NewUseCases,
+		// 	license.NewUseCases,
+		// 	versions.NewUseCases,
+		// 	configs.NewUseCases,
+		// ),
+
+		// fx.Invoke(
+		// 	cron.UpdateVersions,
+		// ),
+
+		// // http module
+		// http.Module,
+	)
+}
+
+
+==========================================
+ФАЙЛ: cmd/app/main.go
+==========================================
+
+package main
+
+import "interslavic/app"
+
+
+func main() {
+	app.New().Run()
+}
+
+
+==========================================
+ФАЙЛ: config/config.go
+==========================================
+
+package config
+
+import (
+	"fmt"
+
+	"github.com/ilyakaznacheev/cleanenv"
+)
+
+type Config struct {
+	HTTP        HTTP        `yaml:"http"`
+	Logging     Logging     `yaml:"logging"`
+	Database    Database    `yaml:"database"`
+}
+
+type HTTP struct {
+	Port             string `yaml:"port"`
+	AuthorizationKey string `yaml:"authorization"`
+}
+
+type Logging struct {
+	Dir        string `yaml:"dir"`
+	Enable     bool   `yaml:"enable"`
+	Level      string `yaml:"level"`
+	Format     string `yaml:"format"`
+	SavingDays int    `yaml:"saving_days"`
+}
+
+type Database struct {
+	URL string `yaml:"url"`
+}
+
+func New() (*Config, error) {
+	cfg := &Config{}
+	if err := cleanenv.ReadConfig("./config.yaml", cfg); err != nil {
+		fmt.Printf("failed get config: %s\n", err)
+	}
+
+	return cfg, nil
+}
+
+
+==========================================
+ФАЙЛ: config.yaml
+==========================================
+
+http:
+  port: 5005
+  authorization: "test_auth"
+
+database: 
+  url: "postgres://drivers:drivers@localhost:5438/drivers?sslmode=disable"
+
+logging:
+  dir: "./logs" # MUST BE STRING, PATH TO SAVE LOG
+  enable: true # MUST BE BOOL.   
+  level: "DEBUG" # MUST BE STRING. Available levels: INFO, WARNING, ERROR. DEFAULT: INFO
+  format: "LOG" # MUST BE STRING. Available formats: TXT, JSON. DEFAULT: TXT
+  saving_days: 10 # MUST BE INTEGER AND MINIMAL VALUE IS 1.
+
+drivers_logs:
+  dir: "./drivers/logs" # MUST BE STRING, PATH TO SAVES LOG
+
+gitlab_token: "token"
+drivers_path: "./applications"
+drivers:
+  - name: "universal_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/universal_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Funiversal_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
+  - name: "lis_api_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/lis_api_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%lis_api_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
+  - name: "txt_result_driver"
+    gitlab_url: "http://gitlab.e-m-l.ru/drivers/txt_result_driver"
+    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%txt_result_driver.exe/raw?ref=deploy"
+    salts: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"      
+
+==========================================
+ФАЙЛ: db/migrations/000001_init.down.sql
+==========================================
+
+-- Удаление триггера и функции
+DROP TRIGGER IF EXISTS update_lesson_progress_updated_at ON lesson_progress;
+DROP FUNCTION IF EXISTS update_updated_at_column();
+
+-- Удаление таблиц в обратном порядке (из-за зависимостей)
+DROP TABLE IF EXISTS user_answers;
+DROP TABLE IF EXISTS lesson_progress;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS lessons;
+DROP TABLE IF EXISTS courses;
+DROP TABLE IF EXISTS users;
+
+==========================================
+ФАЙЛ: db/migrations/000001_init.up.sql
+==========================================
+
+-- Создание таблицы users
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    fullname VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    login VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'student',
+    reg_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP WITH TIME ZONE
+);
+
+-- Создание индексов для users
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_login ON users(login);
+CREATE INDEX idx_users_role ON users(role);
+
+-- Создание таблицы courses
+CREATE TABLE IF NOT EXISTS courses (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    theory TEXT
+);
+
+-- Создание таблицы lessons
+CREATE TABLE IF NOT EXISTS lessons (
+    id SERIAL PRIMARY KEY,
+    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    multimedia TEXT,
+    position INTEGER DEFAULT 0
+);
+
+-- Создание индексов для lessons
+CREATE INDEX idx_lessons_course_id ON lessons(course_id);
+CREATE INDEX idx_lessons_position ON lessons(position);
+
+-- Создание таблицы tasks
+CREATE TABLE IF NOT EXISTS tasks (
+    id SERIAL PRIMARY KEY,
+    lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    task_type INTEGER NOT NULL CHECK (task_type IN (1, 2)), -- 1: Choices, 2: Write
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    choises TEXT[] DEFAULT '{}'
+);
+
+-- Создание индексов для tasks
+CREATE INDEX idx_tasks_lesson_id ON tasks(lesson_id);
+CREATE INDEX idx_tasks_task_type ON tasks(task_type);
+
+-- Создание таблицы lesson_progress
+CREATE TABLE IF NOT EXISTS lesson_progress (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    lesson_id INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    status VARCHAR(20) NOT NULL DEFAULT 'not_started',
+    score INTEGER DEFAULT 0,
+    completion_date TIMESTAMP WITH TIME ZONE,
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, lesson_id)
+);
+
+-- Создание индексов для lesson_progress
+CREATE INDEX idx_lesson_progress_user_id ON lesson_progress(user_id);
+CREATE INDEX idx_lesson_progress_lesson_id ON lesson_progress(lesson_id);
+CREATE INDEX idx_lesson_progress_status ON lesson_progress(status);
+CREATE INDEX idx_lesson_progress_completion_date ON lesson_progress(completion_date);
+
+-- Функция для автоматического обновления updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Триггер для обновления updated_at в lesson_progress
+CREATE TRIGGER update_lesson_progress_updated_at
+    BEFORE UPDATE ON lesson_progress
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Вставка начальных данных (опционально)
+INSERT INTO users (fullname, email, login, password, role) VALUES
+    ('Admin', 'admin@slavicstudy.com', 'admin', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mr/AJ5R2sF5qR5qR5qR5qR5qR5qR5q', 'admin')
+ON CONFLICT (email) DO NOTHING;
+
+==========================================
+ФАЙЛ: docker-compose.yml
+==========================================
+
+version: '3.9'
+services:
+  interslavic:
+      container_name: 'interslavic'
+      depends_on:
+        interslavic-db:
+          condition: service_healthy
+      build:
+          context: .
+          dockerfile: .docker/Dockerfile
+      restart: always
+      command: ./app
+      expose:
+          - '5007'
+      ports:
+          - '5007:5007'
+      volumes:
+          - .docker/config/config.yaml:/opt/interslavic/config.yaml
+          - .docker/applications:/opt/interslavic/applications
+      networks:
+          - intranet
+
+  interslavic-db:
+    container_name: interslavic-db
+    image: postgres:15.2-alpine
+    ports:
+      - '${FORWARD_DB_PORT:-5438}:5432'
+    volumes:
+      - 'interslavic_data:/var/lib/postgresql/data'
+      - '.docker/db/dbinit.sql:/docker-entrypoint-initdb.d/init.sql'
+    environment:
+      POSTGRES_USER: 'interslavic'
+      POSTGRES_PASSWORD: 'interslavic'
+      POSTGRES_DB: 'interslavic'
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "interslavic", "-U", "interslavic" ]
+      retries: 3
+      timeout: 5s
+    networks:
+      - intranet
+
+  interslavic-migrations:
+      container_name: interslavic-migrations
+      depends_on:
+        interslavic-db:
+          condition: service_healthy
+      build:
+        dockerfile: .docker/Dockerfile.migrations
+      command: ["-path", "/db/migrations", "-database",  "postgres://interslavic:interslavic@interslavic-db:5432/interslavic?sslmode=disable", "up"]
+      networks:
+        - intranet 
+
+networks:
+  intranet:
+    name: interslavic_intranet
+volumes:
+  interslavic_data:    
+
+==========================================
+ФАЙЛ: internal/database/postgres.go
+==========================================
+
+package database
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"interslavic/config"
+	"interslavic/logging"
+	"time"
+
+	_ "github.com/lib/pq"
+)
+
+func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
+	mlogger := logging.NewModuleLogger("DB", "POSTGRES", logger)
+	mlogger.Info("Provide DB Postgres")
+	db, err := sql.Open("postgres", cfg.Database.URL)
+	if err != nil {
+		mlogger.Error(err.Error())
+		panic(err)
+	}
+
+	if err = db.Ping(); err != nil {
+		panic(err)
+	}
+
+	// See "Important settings" section.
+	db.SetConnMaxLifetime(time.Minute * 3)
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(10)
+
+	return db
+}
+
+// -----------[TRANSACTION MANAGER]-----------
+
+type PostgresTrManager struct {
+	db        *sql.DB
+	currentTr Transaction
+}
+
+func NewPostgresTrManager(db *sql.DB) *PostgresTrManager {
+	return &PostgresTrManager{
+		db: db,
+	}
+}
+
+// ...........[service structures]...........
+
+type txKey struct{}
+
+func (m *PostgresTrManager) Begin(ctx context.Context) (context.Context, error) {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+
+	if m.currentTr != nil {
+		return nil, errors.New("previous transaction still exists")
+	}
+
+	m.currentTr = &sqlTransaction{tx: tx, active: true}
+
+	return context.WithValue(ctx, txKey{}, tx), nil
+}
+
+func (m *PostgresTrManager) Commit(ctx context.Context) error {
+	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
+		return tx.Commit()
+	}
+
+	m.currentTr = nil
+
+	return nil
+}
+
+func (m *PostgresTrManager) Rollback(ctx context.Context) error {
+	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
+		return tx.Rollback()
+	}
+
+	m.currentTr = nil
+
+	return nil
+}
+
+func (m *PostgresTrManager) GetCurrentTr(ctx context.Context) *sql.Tx {
+	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
+		return tx
+	}
+
+	m.currentTr = nil
+
+	return nil
+}
+
+// ...........[transaction structures]...........
+
+type Transaction interface {
+	IsActive() bool
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
+type sqlTransaction struct {
+	tx     *sql.Tx
+	active bool
+}
+
+func (t *sqlTransaction) IsActive() bool {
+	return t.active
+}
+
+func (t *sqlTransaction) Commit(ctx context.Context) error {
+	if err := t.tx.Commit(); err != nil {
+		return err
+	}
+	t.active = false
+	return nil
+}
+
+func (t *sqlTransaction) Rollback(ctx context.Context) error {
+	if err := t.tx.Rollback(); err != nil {
+		return err
+	}
+	t.active = false
+	return nil
+}
+
+/*
+type Settings interface {
+	// EnrichBy fills nil properties from external Settings.
+	EnrichBy(external Settings) Settings
+
+	// CtxKey returns trm.CtxKey for the trm.Transaction.
+	CtxKey() CtxKey
+	CtxKeyOrNil() *CtxKey
+	SetCtxKey(*CtxKey) Settings
+
+	// Propagation returns trm.Propagation.
+		Propagation() Propagation
+	PropagationOrNil() *Propagation
+	SetPropagation(*Propagation) Settings
+
+	// Cancelable defines that parent trm.Transaction can cancel child trm.Transaction or goroutines.
+	Cancelable() bool
+	CancelableOrNil() *bool
+	SetCancelable(*bool) Settings
+
+	// TimeoutOrNil returns time.Duration of the trm.Transaction.
+	TimeoutOrNil() *time.Duration
+	SetTimeout(*time.Duration) Settings
+}
+
+type СtxManager interface {
+	// Default gets Transaction from context.Context by default CtxKey.
+	Default(ctx context.Context) Transaction
+	// SetDefault sets.Transaction in context.Context by default CtxKey.
+	SetDefault(ctx context.Context, t Transaction) context.Context
+
+	// ByKey gets Transaction from context.Context by CtxKey.
+	ByKey(ctx context.Context, key CtxKey) Transaction
+	// SetByKey sets Transaction in context.Context by.CtxKey.
+	SetByKey(ctx context.Context, key CtxKey, t Transaction) context.Context
+}
+*/
+
+
+==========================================
+ФАЙЛ: internal/database/repository.go
+==========================================
+
+package database
+
+import (
+	"context"
+	"database/sql"
+	"interslavic/logging"
+)
+
+// [SERVICE INTERFACES]
+
+type TrManager interface {
+	Begin(context.Context) (context.Context, error)
+	Commit(context.Context) error
+	Rollback(context.Context) error
+	GetCurrentTr(context.Context) *sql.Tx // WARNING: NOT UNIQUE FOR ALL DRIVERS!
+}
+
+type Repository struct {
+}
+
+func NewRepository(db *sql.DB, logger *logging.ModuleLogger) *Repository {
+	return &Repository{}
+}
+
+
+==========================================
+ФАЙЛ: internal/models/courses.go
+==========================================
+
+package models
+
+type Course struct {
+	ID          int    `json:"id" db:"id"`
+	Title       string `json:"title" db:"title"`
+	Description string `json:"description" db:"description"`
+	Theory      string `json:"theory" db:"theory"`
+}
+ 
+
+==========================================
+ФАЙЛ: internal/models/lessons.go
+==========================================
+
+package models
+
+// Lesson - модель урока
+type Lesson struct {
+	ID         int    `json:"id" db:"id"`
+	CourseID   int    `json:"course_id" db:"course_id"`
+	Title      string `json:"title" db:"title"`
+	Content    string `json:"content" db:"content"`
+	Multimedia string `json:"multimedia" db:"multimedia"`
+}
+
+
+==========================================
+ФАЙЛ: internal/models/lesson_progress.go
+==========================================
+
+package models
+
+import "time"
+
+// Progress - модель прогресса обучения
+type LessonProgress struct {
+	ID             int       `json:"id" db:"id"`
+	UserID         int       `json:"user_id" db:"user_id"`
+	LessonID       int       `json:"lesson_id" db:"lesson_id"`
+	Status         string    `json:"status" db:"status"`
+	Score          int       `json:"score" db:"score"`
+	CompletionDate time.Time `json:"completion_date" db:"completion_date"`
+}
+
+
+==========================================
+ФАЙЛ: internal/models/task.go
+==========================================
+
+package models
+
+type TaskType int
+
+const (
+	ChoisesTask = 1
+	WriteTask   = 2
+)
+
+type Task struct {
+	ID       int      `json:"id" db:"id"`
+	LessonID int      `json:"lesson_id" db:"lesson_id"`
+	TaskType int      `json:"task_type" db:"task_type"`
+	Question string   `json:"question" db:"question"`
+	Answer   string   `json:"answer" db:"answer"`
+	Choises  []string `json:"choises" db:"choises"`
+}
+
+
+==========================================
+ФАЙЛ: internal/models/users.go
+==========================================
+
+package models
+
+import "time"
+
+// User - модель пользователя
+type User struct {
+	ID        int       `json:"id" db:"id"`
+	Fullname  string    `json:"fullname" db:"fullname"`
+	Email     string    `json:"email" db:"email"`
+	Login     string    `json:"login" db:"login"`
+	Password  string    `json:"-" db:"password"` // "-" скрывает поле при JSON сериализации
+	Role      string    `json:"role" db:"role"`
+	RegDate   time.Time `json:"reg_date" db:"reg_date"`
+	LastLogin time.Time `json:"last_login" db:"last_login"`
+}
+
+
+==========================================
+ФАЙЛ: logging/config.go
+==========================================
+
+package logging
+
+import (
+	"log/slog"
+	"strings"
+)
+
+type LoggingConfig struct {
+	Enable     bool
+	Level      slog.Level
+	Format     string
+	SavingDays int
+}
+
+func NewLoggingConfig(enable bool, lvl string, format string, savedays int) *LoggingConfig {
+	return &LoggingConfig{
+		Enable:     enable,
+		Level:      determineSlogLevel(lvl),
+		Format:     validationLoggingFormat(format),
+		SavingDays: savedays,
+	}
+}
+
+func determineSlogLevel(level string) slog.Level {
+	var levels = map[string]slog.Level{
+		"DEBUG":   slog.LevelDebug,
+		"INFO":    slog.LevelInfo,
+		"WARNING": slog.LevelWarn,
+		"ERROR":   slog.LevelError,
+	}
+
+	slogLevelUpper := strings.ToUpper(level)
+	slogLevel, ok := levels[slogLevelUpper]
+	if !ok {
+		panic(ErrInvalidLogLevel)
+	}
+
+	return slogLevel
+}
+
+func validationLoggingFormat(format string) string {
+	format = strings.ToUpper(format)
+	if (format != "TXT") && (format != "JSON") && (format != "LOG") {
+		panic(ErrInvalidLogFormat)
+	}
+
+	return format
+}
+
+
+==========================================
+ФАЙЛ: logging/consts.go
+==========================================
+
+package logging
+
+// [LOG FUNCTIONS]
+const (
+	serviceModuleName  = "SERVICE"
+	serviceModuleValue = "BASE"
+
+	baseModuleName = "VERSION"
+)
+
+// [LOG KEYWORDS]
+const (
+	path     = "(path)"
+	errorKey = "(error)"
+)
+
+// [LOG MESSAGES]
+const (
+	MsgMainKeyword = "SERVER"
+
+	MsgDeleteLastLogs = "Deleted last log file has been successful"
+
+	MsgStateStart         = "START"
+	MsgStateEnd           = "END"
+	MsgAutoDeleteActivate = "AUTO DELETE ACTIVATE"
+)
+
+
+==========================================
+ФАЙЛ: logging/errors.go
+==========================================
+
+package logging
+
+// [ERRORS]
+
+// [STRING ERRORS]
+const (
+	ErrNotSpecifiedCfg = "logging config is not specified"
+
+	ErrInvalidLogLevel = "logging level is invalid, avalible: DEBUG, INFO, WARNING, ERROR"
+	ErrInvalidLogFormat = "logging fortmat is invalid, avalible: TXT, JSON"
+
+	ErrOpenDir = "failed to open logs dir"
+	ErrRemoveLastLogs = "failed to remove last logs"
+	ErrCreateLogFile = "failed to create log file"
+	ErrOpenLogFile = "failed to open log file"
+	ErrCloseLogFile = "failed to close logging file"
+)
+
+// [STRINGF ERRORS]
+const (
+)
+
+==========================================
+ФАЙЛ: logging/funcs.go
+==========================================
+
+package logging
+
+import (
+	"fmt"
+	"interslavic/config"
+	"io"
+	"log"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func ErrAttr(err error) slog.Attr {
+	return slog.Any(errorKey, err)
+}
+
+// getDurationToNextDay returns the time remaining until the next day
+func GetDurationToNextDay() time.Duration {
+	currentTime := time.Now().Local()
+	currentDay := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day(), 0, 0, 0, 0, time.Local)
+	nextDay := currentDay.Add(24 * time.Hour)
+
+	return nextDay.Sub(currentTime)
+}
+
+// deleteLogDaily
+func (bl *BaseLogger) deleteLogDaily() {
+	Notify(MsgAutoDeleteActivate)
+
+	logger := NewModuleLogger(serviceModuleName, serviceModuleValue, bl)
+	if bl.config.SavingDays < 1 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(time.Hour * 23)
+
+		for range ticker.C {
+			DF, err := os.ReadDir(bl.logDirPath)
+			if err != nil {
+				logger.Critical(ErrOpenDir, ErrAttr(err))
+			}
+
+			if len(DF) > bl.config.SavingDays {
+				filePath := filepath.Join(bl.logDirPath, DF[0].Name())
+
+				err = os.Remove(filePath)
+				if err != nil {
+					logger.Error(ErrRemoveLastLogs, ErrAttr(err), slog.Any(path, filePath))
+				}
+
+				logger.Info(MsgDeleteLastLogs, slog.Any(path, filePath))
+			}
+		}
+	}()
+}
+
+// openCurrentLog
+func (bl *BaseLogger) openCurrentLog(ext string) *os.File {
+	logger := NewModuleLogger(serviceModuleName, serviceModuleValue, bl)
+
+	logFilePath := fmt.Sprintf("%s/%s.%s", bl.logDirPath, time.Now().Format("01022006"), ext)
+	logFile, err := os.OpenFile(logFilePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if os.IsNotExist(err) {
+		logFile, err = os.Create(logFilePath)
+		if err != nil {
+			logger.Critical(ErrCreateLogFile, ErrAttr(err), slog.Any(path, logFilePath))
+		}
+
+	} else if err != nil {
+		logger.Critical(ErrOpenLogFile, ErrAttr(err), slog.Any(path, logFilePath))
+	}
+
+	return logFile
+}
+
+func (bl *BaseLogger) InvokeLogging() {
+	logger := NewModuleLogger(serviceModuleName, serviceModuleValue, bl)
+
+	if !bl.config.Enable {
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		slog.SetDefault(logger)
+
+		return
+	}
+
+	t := time.NewTimer(GetDurationToNextDay())
+
+	go func() {
+		for {
+			if _, err := os.Stat(bl.logDirPath); os.IsNotExist(err) {
+				dirErr := os.Mkdir(bl.logDirPath, 0666)
+				if dirErr != nil {
+					logger.Critical(ErrOpenLogFile, ErrAttr(err), slog.Any(path, bl.logDirPath))
+				}
+			}
+
+			// Validate format starting before and that's why we are guaranteed to receive txt or json
+			var logFile *os.File
+			switch bl.config.Format {
+			case "JSON":
+				logFile = bl.openCurrentLog("json")
+				slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: bl.config.Level})))
+			case "TXT":
+				logFile = bl.openCurrentLog("txt")
+				slog.SetDefault(slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: bl.config.Level})))
+			default:
+				logFile = bl.openCurrentLog("log")
+				log.SetOutput(logFile)
+				slog.SetLogLoggerLevel(bl.config.Level)
+			}
+
+			<-t.C                           // Stopping and resetting current timer. Value returns at the moment when timer time has expired
+			t.Reset(GetDurationToNextDay()) // Setup new timer duration
+
+			if err := logFile.Close(); err != nil {
+				logger.Critical(ErrCloseLogFile, ErrAttr(err), slog.Any(path, logFile.Name()))
+			}
+		}
+	}()
+
+	time.Sleep(3 * time.Second) // Wait while anonim gourutine starts
+
+	bl.deleteLogDaily()
+}
+
+func ProvideFXMLoggers(cfg *config.Config) (*BaseLogger, *ModuleLogger) {
+	loggingCfg := NewLoggingConfig(cfg.Logging.Enable, cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.SavingDays)
+	bl := NewBaseLogger(string("1.0.0"), cfg.Logging.Dir, loggingCfg)
+
+	ml := NewModuleLogger("DRIVER", "SERVER", bl)
+
+	return bl, ml
+}
+
+
+==========================================
+ФАЙЛ: logging/logger.go
+==========================================
+
+package logging
+
+import (
+	"fmt"
+	"log/slog"
+)
+
+type Prefixer interface {
+	GetPrefix() string
+}
+
+type BaseLogger struct {
+	config *LoggingConfig
+
+	logDirPath string
+
+	version     string
+	moduleIdent string // VERSION:${version}
+}
+
+func NewBaseLogger(version string, dir string, c *LoggingConfig) *BaseLogger {
+	return &BaseLogger{
+		config: c,
+
+		logDirPath: dir,
+
+		version:     version,
+		moduleIdent: fmt.Sprintf("%s:%s", baseModuleName, version),
+	}
+}
+
+func InvokeBaseLogger(bl *BaseLogger) {
+	bl.InvokeLogging()
+}
+
+func (bl *BaseLogger) GetPrefix() string {
+	return bl.moduleIdent
+}
+
+type ModuleLogger struct {
+	*slog.Logger
+
+	moduleName  string
+	moduleValue string
+	moduleIdent string // moduleName:moduleValue
+}
+
+func NewModuleLogger(n string, v string, p Prefixer) *ModuleLogger {
+	identifier := fmt.Sprintf("%s:%s", n, v)
+	if p != nil {
+		identifier = fmt.Sprintf("%s | %s", p.GetPrefix(), identifier)
+	}
+
+	return &ModuleLogger{
+		Logger: slog.Default(),
+
+		moduleIdent: identifier,
+		moduleName:  n,
+		moduleValue: v,
+	}
+}
+
+func (l *ModuleLogger) GetPrefix() string {
+	return l.moduleIdent
+}
+
+func (l *ModuleLogger) Debug(msg string, args ...any) {
+	baseMsg := fmt.Sprintf("%s - %s", l.moduleIdent, msg)
+
+	l.Logger.Debug(baseMsg, args...)
+}
+
+func (l *ModuleLogger) Info(msg string, args ...any) {
+	baseMsg := fmt.Sprintf("%s - %s", l.moduleIdent, msg)
+
+	l.Logger.Info(baseMsg, args...)
+}
+
+func (l *ModuleLogger) Warn(msg string, args ...any) {
+	baseMsg := fmt.Sprintf("%s - %s", l.moduleIdent, msg)
+
+	l.Logger.Warn(baseMsg, args...)
+}
+
+func (l *ModuleLogger) Error(msg string, args ...any) {
+	baseMsg := fmt.Sprintf("%s - %s", l.moduleIdent, msg)
+
+	l.Logger.Error(baseMsg, args...)
+}
+
+func (l *ModuleLogger) Critical(msg string, args ...any) {
+	baseMsg := fmt.Sprintf("%s - %s", l.moduleIdent, msg)
+
+	l.Logger.Error(baseMsg, args...)
+	panic(baseMsg)
+}
+
+// Notify using [MsgMainKeyword = "DRIVER"]
+func Notify(keyword string) {
+	msg := fmt.Sprintf("------ %s %s ------", MsgMainKeyword, keyword)
+
+	slog.Info(msg)
+}
+
+func NotifyWithOneMsg(keymsg string) {
+	msg := fmt.Sprintf("------ %s ------", keymsg)
+
+	slog.Info(msg)
+}
+
+==========================================
+ФАЙЛ: logging/test_logger.go
+==========================================
+
+package logging
+
+
+
+func ExampleLogger() {
+	cfg := NewLoggingConfig(true, "DEBUG", "txt", 1)
+	bl := NewBaseLogger("0.0.1", "C:\\Users\\itursunov\\Documents\\GitlabProjects\\driverlog\\logs", cfg)
+
+	bl.InvokeLogging()
+
+	logger := NewModuleLogger("TEST", "1.0", bl)
+	logger2 := NewModuleLogger("TEST", "2.0", logger)
+
+	logger.Debug("DEBUG MESSAGE")
+	logger.Info("INFO MESSAGE")
+	logger.Warn("WARN MESSAGE")
+	logger.Error("ERROR MESSAGE")
+	logger2.Debug("DEBUG MESSAGE")
+	logger2.Critical("CRITICAL MESSAGE")
+}

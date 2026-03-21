@@ -1,0 +1,57 @@
+version: '3.9'
+services:
+  interslavic:
+      container_name: 'interslavic'
+      depends_on:
+        interslavic-db:
+          condition: service_healthy
+      build:
+          context: .
+          dockerfile: .docker/Dockerfile
+      restart: always
+      command: ./app
+      expose:
+          - '5007'
+      ports:
+          - '5007:5007'
+      volumes:
+          - .docker/config/config.yaml:/opt/interslavic/config.yaml
+          - .docker/applications:/opt/interslavic/applications
+      networks:
+          - intranet
+
+  interslavic-db:
+    container_name: interslavic-db
+    image: postgres:15.2-alpine
+    ports:
+      - '${FORWARD_DB_PORT:-5438}:5432'
+    volumes:
+      - 'interslavic_data:/var/lib/postgresql/data'
+      - '.docker/db/dbinit.sql:/docker-entrypoint-initdb.d/init.sql'
+    environment:
+      POSTGRES_USER: 'interslavic'
+      POSTGRES_PASSWORD: 'interslavic'
+      POSTGRES_DB: 'interslavic'
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "interslavic", "-U", "interslavic" ]
+      retries: 3
+      timeout: 5s
+    networks:
+      - intranet
+
+  interslavic-migrations:
+      container_name: interslavic-migrations
+      depends_on:
+        interslavic-db:
+          condition: service_healthy
+      build:
+        dockerfile: .docker/Dockerfile.migrations
+      command: ["-path", "/db/migrations", "-database",  "postgres://interslavic:interslavic@interslavic-db:5432/interslavic?sslmode=disable", "up"]
+      networks:
+        - intranet 
+
+networks:
+  intranet:
+    name: interslavic_intranet
+volumes:
+  interslavic_data:    
