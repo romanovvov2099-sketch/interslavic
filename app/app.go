@@ -2,6 +2,10 @@ package app
 
 import (
 	"interslavic/config"
+	"interslavic/internal/auth"
+	"interslavic/internal/database/postgres"
+	"interslavic/internal/http"
+	usecase "interslavic/internal/usecases"
 	"interslavic/logging"
 
 	"go.uber.org/fx"
@@ -19,25 +23,21 @@ func New() *fx.App {
 			logging.InvokeBaseLogger,
 		),
 
-		// fx.Provide(
-		// 	// DB module
-		// 	database.NewPostgres,
-		// 	database.NewRepository,
+		// JWT config
+		fx.Provide(func(cfg *config.Config) *auth.JWTConfig {
+			return auth.NewJWTConfig(cfg.JWT.SecretKey)
+		}),
 
-		// 	// Usecases module
-		// 	client.NewUseCases,
-		// 	drivers.NewUseCases,
-		// 	logs.NewUseCases,
-		// 	license.NewUseCases,
-		// 	versions.NewUseCases,
-		// 	configs.NewUseCases,
-		// ),
+		// Usecases module
+		fx.Provide(
+			usecase.NewAuthUseCase,
+			usecase.NewCourseUseCase,
+			usecase.NewLessonUseCase,
+			usecase.NewTaskUseCase,
+			usecase.NewProgressUseCase,
+		),
 
-		// fx.Invoke(
-		// 	cron.UpdateVersions,
-		// ),
-
-		// // http module
-		// http.Module,
+		postgres.PostgresModule,
+		http.Module,
 	)
 }

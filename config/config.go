@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
@@ -10,6 +9,7 @@ type Config struct {
 	HTTP        HTTP        `yaml:"http"`
 	Logging     Logging     `yaml:"logging"`
 	Database    Database    `yaml:"database"`
+	JWT         JWT         `yaml:"jwt"`
 }
 
 type HTTP struct {
@@ -27,6 +27,10 @@ type Logging struct {
 
 type Database struct {
 	URL string `yaml:"url"`
+}
+
+type JWT struct {
+	SecretKey string `yaml:"secret_key"`
 }
 
 func New() (*Config, error) {

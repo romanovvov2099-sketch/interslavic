@@ -3,7 +3,7 @@ http:
   authorization: "test_auth"
 
 database: 
-  url: "postgres://interslavic:interslavic@localhost:5438/interslavic?sslmode=disable"
+  url: "postgres://interslavic:interslavic@interslavic-db:5432/interslavic?sslmode=disable"
 
 logging:
   dir: "./logs" # MUST BE STRING, PATH TO SAVE LOG

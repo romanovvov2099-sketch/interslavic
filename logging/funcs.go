@@ -129,7 +129,7 @@ func ProvideFXMLoggers(cfg *config.Config) (*BaseLogger, *ModuleLogger) {
 	loggingCfg := NewLoggingConfig(cfg.Logging.Enable, cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.SavingDays)
 	bl := NewBaseLogger(string("1.0.0"), cfg.Logging.Dir, loggingCfg)
 
-	ml := NewModuleLogger("DRIVER", "SERVER", bl)
+	ml := NewModuleLogger("INTERSLAVIC", "APP", bl)
 
 	return bl, ml
 }

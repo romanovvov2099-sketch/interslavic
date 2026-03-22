@@ -1,4 +1,4 @@
-package database
+package postgres
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"go.uber.org/fx"
 )
 
 func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
@@ -24,15 +25,12 @@ func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
 		panic(err)
 	}
 
-	// See "Important settings" section.
 	db.SetConnMaxLifetime(time.Minute * 3)
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(10)
 
 	return db
 }
-
-// -----------[TRANSACTION MANAGER]-----------
 
 type PostgresTrManager struct {
 	db        *sql.DB
@@ -44,8 +42,6 @@ func NewPostgresTrManager(db *sql.DB) *PostgresTrManager {
 		db: db,
 	}
 }
-
-// ...........[service structures]...........
 
 type txKey struct{}
 
@@ -94,8 +90,6 @@ func (m *PostgresTrManager) GetCurrentTr(ctx context.Context) *sql.Tx {
 	return nil
 }
 
-// ...........[transaction structures]...........
-
 type Transaction interface {
 	IsActive() bool
 	Commit(context.Context) error
@@ -127,40 +121,14 @@ func (t *sqlTransaction) Rollback(ctx context.Context) error {
 	return nil
 }
 
-/*
-type Settings interface {
-	// EnrichBy fills nil properties from external Settings.
-	EnrichBy(external Settings) Settings
-
-	// CtxKey returns trm.CtxKey for the trm.Transaction.
-	CtxKey() CtxKey
-	CtxKeyOrNil() *CtxKey
-	SetCtxKey(*CtxKey) Settings
-
-	// Propagation returns trm.Propagation.
-		Propagation() Propagation
-	PropagationOrNil() *Propagation
-	SetPropagation(*Propagation) Settings
-
-	// Cancelable defines that parent trm.Transaction can cancel child trm.Transaction or goroutines.
-	Cancelable() bool
-	CancelableOrNil() *bool
-	SetCancelable(*bool) Settings
-
-	// TimeoutOrNil returns time.Duration of the trm.Transaction.
-	TimeoutOrNil() *time.Duration
-	SetTimeout(*time.Duration) Settings
-}
-
-type СtxManager interface {
-	// Default gets Transaction from context.Context by default CtxKey.
-	Default(ctx context.Context) Transaction
-	// SetDefault sets.Transaction in context.Context by default CtxKey.
-	SetDefault(ctx context.Context, t Transaction) context.Context
-
-	// ByKey gets Transaction from context.Context by CtxKey.
-	ByKey(ctx context.Context, key CtxKey) Transaction
-	// SetByKey sets Transaction in context.Context by.CtxKey.
-	SetByKey(ctx context.Context, key CtxKey, t Transaction) context.Context
-}
-*/
+// PostgresModule
+var PostgresModule = fx.Module("postgres",
+	fx.Provide(
+		NewPostgres,
+		NewUserRepository,
+		NewCourseRepository,
+		NewLessonRepository,
+		NewTaskRepository,
+		NewLessonProgressRepository,
+	),
+)

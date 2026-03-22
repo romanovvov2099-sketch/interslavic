@@ -1,0 +1,773 @@
+definitions:
+  auth.TokenPair:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+    type: object
+  models.Course:
+    properties:
+      description:
+        type: string
+      id:
+        type: integer
+      theory:
+        type: string
+      title:
+        type: string
+    type: object
+  models.CourseProgress:
+    properties:
+      completed_lessons:
+        type: integer
+      course_id:
+        type: integer
+      course_title:
+        type: string
+      in_progress_lessons:
+        type: integer
+      not_started_lessons:
+        type: integer
+      progress_percent:
+        type: number
+      status:
+        description: not_started, in_progress, completed
+        type: string
+      total_lessons:
+        type: integer
+    type: object
+  models.CourseWithProgress:
+    properties:
+      completed_lessons:
+        type: integer
+      description:
+        type: string
+      id:
+        type: integer
+      lessons:
+        items:
+          $ref: '#/definitions/models.LessonWithProgress'
+        type: array
+      progress_percent:
+        type: number
+      status:
+        type: string
+      theory:
+        type: string
+      title:
+        type: string
+      total_lessons:
+        type: integer
+    type: object
+  models.Lesson:
+    properties:
+      content:
+        type: string
+      course_id:
+        type: integer
+      id:
+        type: integer
+      multimedia:
+        type: string
+      position:
+        type: integer
+      title:
+        type: string
+    type: object
+  models.LessonProgress:
+    properties:
+      completion_date:
+        type: string
+      id:
+        type: integer
+      lesson_id:
+        type: integer
+      score:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  models.LessonWithProgress:
+    properties:
+      completed_at:
+        type: string
+      content:
+        type: string
+      course_id:
+        type: integer
+      id:
+        type: integer
+      multimedia:
+        type: string
+      position:
+        type: integer
+      progress_score:
+        type: integer
+      progress_status:
+        type: string
+      title:
+        type: string
+    type: object
+  models.Task:
+    properties:
+      answer:
+        type: string
+      choises:
+        items:
+          type: string
+        type: array
+      id:
+        type: integer
+      lesson_id:
+        type: integer
+      question:
+        type: string
+      task_type:
+        type: integer
+    type: object
+  models.UpdateProgressRequest:
+    properties:
+      lesson_id:
+        type: integer
+      score:
+        maximum: 100
+        minimum: 0
+        type: integer
+      status:
+        enum:
+        - not_started
+        - in_progress
+        - completed
+        type: string
+    required:
+    - lesson_id
+    - status
+    type: object
+  models.User:
+    properties:
+      email:
+        type: string
+      fullname:
+        type: string
+      id:
+        type: integer
+      last_login:
+        type: string
+      login:
+        type: string
+      reg_date:
+        type: string
+      role:
+        type: string
+    type: object
+  usecases.AuthResponse:
+    properties:
+      tokens:
+        $ref: '#/definitions/auth.TokenPair'
+      user:
+        $ref: '#/definitions/models.User'
+    type: object
+  usecases.CheckAnswerRequest:
+    properties:
+      answer:
+        type: string
+      task_id:
+        type: integer
+    type: object
+  usecases.CheckAnswerResponse:
+    properties:
+      is_correct:
+        type: boolean
+      message:
+        type: string
+    type: object
+  usecases.LessonWithTasks:
+    properties:
+      lesson:
+        $ref: '#/definitions/models.Lesson'
+      tasks:
+        items:
+          $ref: '#/definitions/models.Task'
+        type: array
+    type: object
+  usecases.LoginRequest:
+    properties:
+      login:
+        type: string
+      password:
+        type: string
+    type: object
+  usecases.RegisterRequest:
+    properties:
+      email:
+        type: string
+      fullname:
+        type: string
+      login:
+        type: string
+      password:
+        type: string
+      role:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Login with login and password
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Login user
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: Get current authenticated user info
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get current user
+      tags:
+      - auth
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Get new access token using refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.TokenPair'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Refresh access token
+      tags:
+      - auth
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Register new user with email, login and password
+      parameters:
+      - description: User registration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register new user
+      tags:
+      - auth
+  /api/courses:
+    get:
+      description: Get list of all available courses
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Course'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get all courses
+      tags:
+      - courses
+  /api/courses/{id}:
+    get:
+      description: Get course details by ID
+      parameters:
+      - description: Course ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Course'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get course by ID
+      tags:
+      - courses
+  /api/courses/{id}/lessons:
+    get:
+      description: Get all lessons of a specific course
+      parameters:
+      - description: Course ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Lesson'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lessons by course ID
+      tags:
+      - courses
+  /api/lessons/{id}:
+    get:
+      description: Get lesson details by ID
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Lesson'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lesson by ID
+      tags:
+      - lessons
+  /api/lessons/{id}/full:
+    get:
+      description: Get lesson details and all its tasks
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.LessonWithTasks'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lesson with tasks
+      tags:
+      - lessons
+  /api/lessons/{id}/tasks:
+    get:
+      description: Get all tasks of a specific lesson
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get tasks by lesson ID
+      tags:
+      - lessons
+  /api/progress:
+    get:
+      description: Get all progress records for the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.LessonProgress'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get user's all progress
+      tags:
+      - progress
+  /api/progress/course/{course_id}:
+    get:
+      description: Get user's progress for a specific course with statistics
+      parameters:
+      - description: Course ID
+        in: path
+        name: course_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CourseProgress'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get course progress
+      tags:
+      - progress
+  /api/progress/course/{course_id}/full:
+    get:
+      description: Get full course details with all lessons and user's progress for
+        each lesson
+      parameters:
+      - description: Course ID
+        in: path
+        name: course_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CourseWithProgress'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get course with lessons progress
+      tags:
+      - progress
+  /api/progress/courses:
+    get:
+      description: Get user's progress for all courses
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.CourseProgress'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get all courses progress
+      tags:
+      - progress
+  /api/progress/lesson/{lesson_id}:
+    get:
+      description: Get user's progress for a specific lesson
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: lesson_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.LessonProgress'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get lesson progress
+      tags:
+      - progress
+  /api/progress/update:
+    post:
+      consumes:
+      - application/json
+      description: Update user's progress for a specific lesson (not_started, in_progress,
+        completed)
+      parameters:
+      - description: Progress update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.UpdateProgressRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.LessonProgress'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update lesson progress
+      tags:
+      - progress
+  /api/tasks/check:
+    post:
+      consumes:
+      - application/json
+      description: Check if the provided answer is correct
+      parameters:
+      - description: Answer to check
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.CheckAnswerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.CheckAnswerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check task answer
+      tags:
+      - tasks
+swagger: "2.0"

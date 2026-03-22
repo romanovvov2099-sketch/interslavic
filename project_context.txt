@@ -1,23 +1,24 @@
 ==========================================
 КОНТЕКСТ ПРОЕКТА
-Сгенерировано: Sat Mar 21 23:09:32 UTC 2026
-Директория проекта: /mnt/host/d/work/Julia-app/Slavicstudy
+Сгенерировано: Sun Mar 22 16:10:54 MSK 2026
+Директория проекта: /d/work/Julia-app/Slavicstudy
 ==========================================
 
 СТАТИСТИКА:
 - Обработано файлов: 0
 - Всего строк кода: 0
-- Размер файла: 28.0K
+- Размер файла: 176K
 ==========================================
 
 ==========================================
 КОНТЕКСТ ПРОЕКТА
-Сгенерировано: Sat Mar 21 23:09:31 UTC 2026
-Директория проекта: /mnt/host/d/work/Julia-app/Slavicstudy
+Сгенерировано: Sun Mar 22 16:10:44 MSK 2026
+Директория проекта: /d/work/Julia-app/Slavicstudy
 ==========================================
 
 СТРУКТУРА ПРОЕКТА:
 ------------------------------------------
+.docker/config/config.yaml
 .docker/db/dbinit.sql
 app/app.go
 cmd/app/main.go
@@ -25,14 +26,38 @@ config/config.go
 config.yaml
 db/migrations/000001_init.down.sql
 db/migrations/000001_init.up.sql
+db/migrations/000002_add_seeding_data.down.sql
+db/migrations/000002_add_seeding_data.up.sql
+db/seeding/seed.sql
 docker-compose.yml
-internal/database/postgres.go
+docs/docs.go
+docs/swagger.json
+docs/swagger.yaml
+internal/auth/jwt.go
+internal/database/postgres/course_repository.go
+internal/database/postgres/lesson_repository.go
+internal/database/postgres/postgres.go
+internal/database/postgres/task_repository.go
+internal/database/postgres/user_repository.go
 internal/database/repository.go
+internal/http/fiberfx.go
+internal/http/handler.go
+internal/http/handlers/auth_handler.go
+internal/http/handlers/course_handler.go
+internal/http/handlers/lesson_handler.go
+internal/http/handlers/task_handler.go
+internal/http/middlewares/authorization.go
+internal/http/middlewares/jwt_authorization.go
+internal/http/middlewares/logging.go
 internal/models/courses.go
 internal/models/lessons.go
 internal/models/lesson_progress.go
 internal/models/task.go
 internal/models/users.go
+internal/usecases/auth_usecase.go
+internal/usecases/course_usecase.go
+internal/usecases/lessons_usecase.go
+internal/usecases/task_usecase.go
 logging/config.go
 logging/consts.go
 logging/errors.go
@@ -44,6 +69,27 @@ logging/test_logger.go
 СОДЕРЖИМОЕ ФАЙЛОВ:
 ==========================================
 
+
+==========================================
+ФАЙЛ: .docker/config/config.yaml
+==========================================
+
+http:
+  port: 5007
+  authorization: "test_auth"
+
+database: 
+  url: "postgres://interslavic:interslavic@interslavic-db:5432/interslavic?sslmode=disable"
+
+logging:
+  dir: "./logs" # MUST BE STRING, PATH TO SAVE LOG
+  enable: true # MUST BE BOOL.   
+  level: "DEBUG" # MUST BE STRING. Available levels: INFO, WARNING, ERROR. DEFAULT: INFO
+  format: "LOG" # MUST BE STRING. Available formats: TXT, JSON. DEFAULT: TXT
+  saving_days: 10 # MUST BE INTEGER AND MINIMAL VALUE IS 1.
+
+jwt:
+  secret_key: "your-secret-key-change-in-production"
 
 ==========================================
 ФАЙЛ: .docker/db/dbinit.sql
@@ -59,6 +105,10 @@ package app
 
 import (
 	"interslavic/config"
+	"interslavic/internal/auth"
+	"interslavic/internal/database/postgres"
+	"interslavic/internal/http"
+	usecase "interslavic/internal/usecases"
 	"interslavic/logging"
 
 	"go.uber.org/fx"
@@ -76,26 +126,21 @@ func New() *fx.App {
 			logging.InvokeBaseLogger,
 		),
 
-		// fx.Provide(
-		// 	// DB module
-		// 	database.NewPostgres,
-		// 	database.NewRepository,
+		// JWT config
+		fx.Provide(func(cfg *config.Config) *auth.JWTConfig {
+			return auth.NewJWTConfig(cfg.JWT.SecretKey)
+		}),
 
-		// 	// Usecases module
-		// 	client.NewUseCases,
-		// 	drivers.NewUseCases,
-		// 	logs.NewUseCases,
-		// 	license.NewUseCases,
-		// 	versions.NewUseCases,
-		// 	configs.NewUseCases,
-		// ),
+		// Usecases module
+		fx.Provide(
+			usecase.NewAuthUseCase,
+			usecase.NewCourseUseCase,
+			usecase.NewLessonUseCase,
+			usecase.NewTaskUseCase,
+		),
 
-		// fx.Invoke(
-		// 	cron.UpdateVersions,
-		// ),
-
-		// // http module
-		// http.Module,
+		postgres.PostgresModule,
+		http.Module,
 	)
 }
 
@@ -122,7 +167,6 @@ package config
 
 import (
 	"fmt"
-
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
@@ -130,6 +174,7 @@ type Config struct {
 	HTTP        HTTP        `yaml:"http"`
 	Logging     Logging     `yaml:"logging"`
 	Database    Database    `yaml:"database"`
+	JWT         JWT         `yaml:"jwt"`
 }
 
 type HTTP struct {
@@ -149,6 +194,10 @@ type Database struct {
 	URL string `yaml:"url"`
 }
 
+type JWT struct {
+	SecretKey string `yaml:"secret_key"`
+}
+
 func New() (*Config, error) {
 	cfg := &Config{}
 	if err := cleanenv.ReadConfig("./config.yaml", cfg); err != nil {
@@ -158,17 +207,16 @@ func New() (*Config, error) {
 	return cfg, nil
 }
 
-
 ==========================================
 ФАЙЛ: config.yaml
 ==========================================
 
 http:
-  port: 5005
+  port: 5007
   authorization: "test_auth"
 
 database: 
-  url: "postgres://drivers:drivers@localhost:5438/drivers?sslmode=disable"
+  url: "postgres://interslavic:interslavic@localhost:5438/interslavic?sslmode=disable"
 
 logging:
   dir: "./logs" # MUST BE STRING, PATH TO SAVE LOG
@@ -177,24 +225,8 @@ logging:
   format: "LOG" # MUST BE STRING. Available formats: TXT, JSON. DEFAULT: TXT
   saving_days: 10 # MUST BE INTEGER AND MINIMAL VALUE IS 1.
 
-drivers_logs:
-  dir: "./drivers/logs" # MUST BE STRING, PATH TO SAVES LOG
-
-gitlab_token: "token"
-drivers_path: "./applications"
-drivers:
-  - name: "universal_driver"
-    gitlab_url: "http://gitlab.e-m-l.ru/drivers/universal_driver"
-    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Funiversal_driver.exe/raw?ref=deploy"
-    salts: "http://gitlab.e-m-l.ru/api/v4/projects/175/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
-  - name: "lis_api_driver"
-    gitlab_url: "http://gitlab.e-m-l.ru/drivers/lis_api_driver"
-    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%lis_api_driver.exe/raw?ref=deploy"
-    salts: "http://gitlab.e-m-l.ru/api/v4/projects/181/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"
-  - name: "txt_result_driver"
-    gitlab_url: "http://gitlab.e-m-l.ru/drivers/txt_result_driver"
-    deploy: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%txt_result_driver.exe/raw?ref=deploy"
-    salts: "http://gitlab.e-m-l.ru/api/v4/projects/190/repository/files/deploy_$V%2Fsalts.txt/raw?ref=deploy"      
+jwt:
+  secret_key: "your-secret-key-change-in-production"
 
 ==========================================
 ФАЙЛ: db/migrations/000001_init.down.sql
@@ -309,6 +341,1308 @@ INSERT INTO users (fullname, email, login, password, role) VALUES
 ON CONFLICT (email) DO NOTHING;
 
 ==========================================
+ФАЙЛ: db/migrations/000002_add_seeding_data.down.sql
+==========================================
+
+BEGIN;
+
+-- =====================================================
+-- 1. Удаление данных из LESSON_PROGRESS
+-- =====================================================
+
+-- Удаляем прогресс для Ивана
+DELETE FROM lesson_progress
+WHERE user_id IN (SELECT id FROM users WHERE email = 'ivan@slavicstudy.com')
+  AND lesson_id IN (SELECT id FROM lessons WHERE title IN (
+    'Что такое межславянский язык?',
+    'Где используется Interslavic?',
+    'Алфавит и чтение'
+));
+
+-- Удаляем прогресс для Марии
+DELETE FROM lesson_progress
+WHERE user_id IN (SELECT id FROM users WHERE email = 'maria@slavicstudy.com')
+  AND lesson_id IN (SELECT id FROM lessons WHERE title IN (
+    'Что такое межславянский язык?',
+    'Личные местоимения',
+    'Глагол byti (быть)'
+));
+
+-- Удаляем прогресс для Oleksandr
+DELETE FROM lesson_progress
+WHERE user_id IN (SELECT id FROM users WHERE email = 'oleksandr@slavicstudy.com')
+  AND lesson_id IN (SELECT id FROM lessons WHERE title IN (
+    'Что такое межславянский язык?',
+    'Чтение простого текста',
+    'Знакомство и приветствие'
+));
+
+-- =====================================================
+-- 2. Удаление данных из TASKS
+-- =====================================================
+
+-- Удаляем задачи из урока "Что такое межславянский язык?"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Что такое межславянский язык?')
+  AND question IN (
+    'Для кого в первую очередь создан межславянский язык?',
+    'Какова главная цель межславянского языка?',
+    'Напиши кратко, зачем нужен межславянский язык.'
+);
+
+-- Удаляем задачи из урока "Где используется Interslavic?"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Где используется Interslavic?')
+  AND question IN (
+    'Где может использоваться межславянский язык?',
+    'Напиши один пример, где может пригодиться Interslavic.'
+);
+
+-- Удаляем задачи из урока "Алфавит и чтение"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Алфавит и чтение')
+  AND question IN (
+    'Что изучается в этом уроке?',
+    'Напиши, почему похожесть букв помогает в изучении межславянского.'
+);
+
+-- Удаляем задачи из урока "Личные местоимения"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Личные местоимения')
+  AND question IN (
+    'Какое из слов является личным местоимением?',
+    'Что означает местоимение "my"?',
+    'Напиши три личных местоимения на межславянском.'
+);
+
+-- Удаляем задачи из урока "Глагол byti (быть)"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Глагол byti (быть)')
+  AND question IN (
+    'Какой глагол изучается в этом уроке?',
+    'Что означает "byti"?',
+    'Напиши инфинитив глагола "быть" на межславянском.'
+);
+
+-- Удаляем задачи из урока "Простое предложение"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Простое предложение')
+  AND question IN (
+    'Из чего состоит простое предложение?',
+    'Напиши простое предложение на межславянском.'
+);
+
+-- Удаляем задачи из урока "Базовая лексика: семья, дом, человек"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Базовая лексика: семья, дом, человек')
+  AND question IN (
+    'Какое слово ближе по теме к "семья"?',
+    'Напиши одно слово на межславянском по теме "дом" или "семья".'
+);
+
+-- Удаляем задачи из урока "Чтение простого текста"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Чтение простого текста')
+  AND question IN (
+    'Что развивает этот урок?',
+    'Напиши, зачем полезно читать простые тексты на изучаемом языке.'
+);
+
+-- Удаляем задачи из урока "Знакомство и приветствие"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Знакомство и приветствие')
+  AND question IN (
+    'Как можно перевести "Dobry den"?',
+    'Напиши простое приветствие на межславянском.'
+);
+
+-- Удаляем задачи из урока "Короткие ответы письменно"
+DELETE FROM tasks
+WHERE lesson_id IN (SELECT id FROM lessons WHERE title = 'Короткие ответы письменно')
+  AND question IN (
+    'Что тренирует этот урок?',
+    'Напиши короткий ответ на вопрос "Kto ty?"'
+);
+
+-- =====================================================
+-- 3. Удаление данных из LESSONS
+-- =====================================================
+
+-- Удаляем уроки курса "Введение в межславянский язык"
+DELETE FROM lessons
+WHERE course_id IN (SELECT id FROM courses WHERE title = 'Введение в межславянский язык')
+  AND title IN (
+    'Что такое межславянский язык?',
+    'Где используется Interslavic?',
+    'Алфавит и чтение'
+);
+
+-- Удаляем уроки курса "Базовая грамматика межславянского"
+DELETE FROM lessons
+WHERE course_id IN (SELECT id FROM courses WHERE title = 'Базовая грамматика межславянского')
+  AND title IN (
+    'Личные местоимения',
+    'Глагол byti (быть)',
+    'Простое предложение',
+    'Базовая лексика: семья, дом, человек'
+);
+
+-- Удаляем уроки курса "Практика чтения и общения"
+DELETE FROM lessons
+WHERE course_id IN (SELECT id FROM courses WHERE title = 'Практика чтения и общения')
+  AND title IN (
+    'Чтение простого текста',
+    'Знакомство и приветствие',
+    'Короткие ответы письменно'
+);
+
+-- =====================================================
+-- 4. Удаление данных из COURSES
+-- =====================================================
+
+DELETE FROM courses
+WHERE title IN (
+    'Введение в межславянский язык',
+    'Базовая грамматика межславянского',
+    'Практика чтения и общения'
+);
+
+-- =====================================================
+-- 5. Удаление данных из USERS
+-- =====================================================
+
+DELETE FROM users
+WHERE email IN (
+    'admin@slavicstudy.com',
+    'ivan@slavicstudy.com',
+    'maria@slavicstudy.com',
+    'oleksandr@slavicstudy.com',
+    'teacher@slavicstudy.com'
+);
+
+COMMIT;
+
+==========================================
+ФАЙЛ: db/migrations/000002_add_seeding_data.up.sql
+==========================================
+
+BEGIN;
+
+-- =====================================================
+-- 1. USERS
+-- =====================================================
+
+INSERT INTO users (fullname, email, login, password, role, last_login)
+VALUES
+    ('Admin', 'admin@slavicstudy.com', 'admin', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mr/AJ5R2sF5qR5qR5qR5qR5qR5qR5q', 'admin', CURRENT_TIMESTAMP),
+    ('Ivan Petrov', 'ivan@slavicstudy.com', 'ivanpetrov', '$2a$10$examplehash111111111111111111111111111111111111111', 'student', CURRENT_TIMESTAMP - INTERVAL '1 day'),
+    ('Maria Sokolova', 'maria@slavicstudy.com', 'mariasokolova', '$2a$10$examplehash222222222222222222222222222222222222222', 'student', CURRENT_TIMESTAMP - INTERVAL '2 days'),
+    ('Oleksandr Novak', 'oleksandr@slavicstudy.com', 'oleksandrnovak', '$2a$10$examplehash333333333333333333333333333333333333333', 'student', CURRENT_TIMESTAMP - INTERVAL '3 days'),
+    ('Teacher Demo', 'teacher@slavicstudy.com', 'teacherdemo', '$2a$10$examplehash444444444444444444444444444444444444444', 'teacher', CURRENT_TIMESTAMP)
+ON CONFLICT (email) DO NOTHING;
+
+-- =====================================================
+-- 2. COURSES
+-- =====================================================
+
+INSERT INTO courses (title, description, theory)
+SELECT *
+FROM (
+    VALUES
+    (
+        'Введение в межславянский язык',
+        'Базовый курс для знакомства с межславянским языком, его историей, назначением и сферой применения.',
+        'Межславянский язык (Medžuslovjansky) — это искусственно созданный вспомогательный язык, разработанный так, чтобы быть интуитивно понятным носителям разных славянских языков без длительного предварительного обучения.'
+    ),
+    (
+        'Базовая грамматика межславянского',
+        'Курс по основам грамматики: местоимения, глаголы, существительные, порядок слов.',
+        'Грамматика межславянского языка строится на общих чертах славянских языков. В языке используются знакомые корни, упрощённые формы и относительно свободный порядок слов.'
+    ),
+    (
+        'Практика чтения и общения',
+        'Курс для закрепления навыков чтения, письма и понимания простых диалогов на межславянском языке.',
+        'Практика включает чтение адаптированных текстов, понимание базовой лексики, ответы на вопросы и составление коротких сообщений и диалогов.'
+    )
+) AS v(title, description, theory)
+WHERE NOT EXISTS (
+    SELECT 1 FROM courses c WHERE c.title = v.title
+);
+
+-- =====================================================
+-- 3. LESSONS
+-- =====================================================
+
+-- Курс 1
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Что такое межславянский язык?',
+        'В этом уроке студент знакомится с понятием межславянского языка, узнаёт, зачем он был создан и кому может быть полезен.',
+        'video_intro.mp4',
+        1
+    ),
+    (
+        'Где используется Interslavic?',
+        'Урок посвящён практическому применению языка: общение между славянами, международные проекты, интернет-сообщества, музыка и медиа.',
+        'slides_usage.pdf',
+        2
+    ),
+    (
+        'Алфавит и чтение',
+        'В уроке рассматриваются основы чтения, знакомые буквы, латиница и принципы произношения слов.',
+        'audio_alphabet.mp3',
+        3
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Введение в межславянский язык'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- Курс 2
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Личные местоимения',
+        'Изучение базовых местоимений: ja, ty, on, ona, my, vy, oni.',
+        'video_pronouns.mp4',
+        1
+    ),
+    (
+        'Глагол byti (быть)',
+        'Урок знакомит с глаголом byti и его ролью в простых предложениях.',
+        'audio_byti.mp3',
+        2
+    ),
+    (
+        'Простое предложение',
+        'Урок о том, как строятся короткие повествовательные предложения в межславянском языке.',
+        'grammar_sentence.pdf',
+        3
+    ),
+    (
+        'Базовая лексика: семья, дом, человек',
+        'Изучение часто употребляемых слов, связанных с повседневной жизнью.',
+        'cards_basic_words.pdf',
+        4
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Базовая грамматика межславянского'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- Курс 3
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Чтение простого текста',
+        'Практика чтения короткого адаптированного текста на межславянском языке.',
+        'reading_text_01.pdf',
+        1
+    ),
+    (
+        'Знакомство и приветствие',
+        'Отработка простых диалогов: приветствие, представление себя, базовые вопросы.',
+        'dialogue_intro.mp3',
+        2
+    ),
+    (
+        'Короткие ответы письменно',
+        'Практика письменных ответов на простые вопросы по теме уроков.',
+        'writing_tasks.docx',
+        3
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Практика чтения и общения'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- =====================================================
+-- 4. TASKS
+-- task_type:
+-- 1 = Choices
+-- 2 = Write
+-- =====================================================
+
+-- -----------------------------------------------------
+-- Урок: Что такое межславянский язык?
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Для кого в первую очередь создан межславянский язык?',
+        'Для носителей славянских языков',
+        ARRAY[
+            'Для носителей славянских языков',
+            'Только для программистов',
+            'Только для жителей Польши',
+            'Для изучения японского языка'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Какова главная цель межславянского языка?',
+        'Облегчить общение между славянами',
+        ARRAY[
+            'Сделать новый тайный язык',
+            'Облегчить общение между славянами',
+            'Заменить все национальные языки',
+            'Использоваться только в школе'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши кратко, зачем нужен межславянский язык.',
+        'Для общения между носителями разных славянских языков',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Что такое межславянский язык?'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Где используется Interslavic?
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Где может использоваться межславянский язык?',
+        'В международном общении между славянами',
+        ARRAY[
+            'Только в математике',
+            'Только в военной сфере',
+            'В международном общении между славянами',
+            'Только в медицине'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши один пример, где может пригодиться Interslavic.',
+        'В общении людей из разных славянских стран',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Где используется Interslavic?'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Алфавит и чтение
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что изучается в этом уроке?',
+        'Основы чтения и алфавит',
+        ARRAY[
+            'Интегралы',
+            'Основы чтения и алфавит',
+            'История Франции',
+            'Программирование на C++'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши, почему похожесть букв помогает в изучении межславянского.',
+        'Потому что многие слова и буквы узнаваемы для славян',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Алфавит и чтение'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Личные местоимения
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какое из слов является личным местоимением?',
+        'ja',
+        ARRAY[
+            'dom',
+            'ja',
+            'dobry',
+            'pisati'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Что означает местоимение "my"?',
+        'мы',
+        ARRAY[
+            'я',
+            'он',
+            'мы',
+            'они'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши три личных местоимения на межславянском.',
+        'ja, ty, on',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Личные местоимения'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Глагол byti (быть)
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какой глагол изучается в этом уроке?',
+        'byti',
+        ARRAY[
+            'čitati',
+            'byti',
+            'govoriti',
+            'viděti'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Что означает "byti"?',
+        'быть',
+        ARRAY[
+            'идти',
+            'быть',
+            'говорить',
+            'учиться'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши инфинитив глагола "быть" на межславянском.',
+        'byti',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Глагол byti (быть)'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Простое предложение
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Из чего состоит простое предложение?',
+        'Из подлежащего и сказуемого',
+        ARRAY[
+            'Только из одного числа',
+            'Из подлежащего и сказуемого',
+            'Только из предлогов',
+            'Только из междометий'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши простое предложение на межславянском.',
+        'Ja jesm student',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Простое предложение'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Базовая лексика: семья, дом, человек
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какое слово ближе по теме к "семья"?',
+        'matka',
+        ARRAY[
+            'matka',
+            'pisati',
+            'modry',
+            'brzo'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши одно слово на межславянском по теме "дом" или "семья".',
+        'dom',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Базовая лексика: семья, дом, человек'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Чтение простого текста
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что развивает этот урок?',
+        'Навык чтения',
+        ARRAY[
+            'Навык чтения',
+            'Только спортивную форму',
+            'Знание химии',
+            'Навык программирования'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши, зачем полезно читать простые тексты на изучаемом языке.',
+        'Чтобы лучше понимать лексику и структуру языка',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Чтение простого текста'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Знакомство и приветствие
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Как можно перевести "Dobry den"?',
+        'Добрый день',
+        ARRAY[
+            'До свидания',
+            'Спокойной ночи',
+            'Добрый день',
+            'Спасибо'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши простое приветствие на межславянском.',
+        'Dobry den',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Знакомство и приветствие'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Короткие ответы письменно
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что тренирует этот урок?',
+        'Письменные ответы',
+        ARRAY[
+            'Письменные ответы',
+            'Футбол',
+            'Высшую математику',
+            'Монтаж видео'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши короткий ответ на вопрос "Kto ty?"',
+        'Ja jesm student',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Короткие ответы письменно'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- =====================================================
+-- 5. LESSON_PROGRESS
+-- =====================================================
+
+-- Иван
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 95, CURRENT_TIMESTAMP - INTERVAL '10 days', CURRENT_TIMESTAMP - INTERVAL '11 days', CURRENT_TIMESTAMP - INTERVAL '10 days'),
+    ('Где используется Interslavic?', 'completed', 88, CURRENT_TIMESTAMP - INTERVAL '9 days', CURRENT_TIMESTAMP - INTERVAL '10 days', CURRENT_TIMESTAMP - INTERVAL '9 days'),
+    ('Алфавит и чтение', 'in_progress', 60, NULL, CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '1 day')
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'ivan@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+-- Мария
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 100, CURRENT_TIMESTAMP - INTERVAL '8 days', CURRENT_TIMESTAMP - INTERVAL '9 days', CURRENT_TIMESTAMP - INTERVAL '8 days'),
+    ('Личные местоимения', 'completed', 92, CURRENT_TIMESTAMP - INTERVAL '5 days', CURRENT_TIMESTAMP - INTERVAL '6 days', CURRENT_TIMESTAMP - INTERVAL '5 days'),
+    ('Глагол byti (быть)', 'in_progress', 55, NULL, CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP - INTERVAL '6 hours')
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'maria@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+-- Oleksandr
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 85, CURRENT_TIMESTAMP - INTERVAL '7 days', CURRENT_TIMESTAMP - INTERVAL '8 days', CURRENT_TIMESTAMP - INTERVAL '7 days'),
+    ('Чтение простого текста', 'in_progress', 40, NULL, CURRENT_TIMESTAMP - INTERVAL '12 hours', CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+    ('Знакомство и приветствие', 'not_started', 0, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'oleksandr@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+COMMIT;
+
+==========================================
+ФАЙЛ: db/seeding/seed.sql
+==========================================
+
+BEGIN;
+
+-- =====================================================
+-- 1. USERS
+-- =====================================================
+
+INSERT INTO users (fullname, email, login, password, role, last_login)
+VALUES
+    ('Admin', 'admin@slavicstudy.com', 'admin', '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mr/AJ5R2sF5qR5qR5qR5qR5qR5qR5q', 'admin', CURRENT_TIMESTAMP),
+    ('Ivan Petrov', 'ivan@slavicstudy.com', 'ivanpetrov', '$2a$10$examplehash111111111111111111111111111111111111111', 'student', CURRENT_TIMESTAMP - INTERVAL '1 day'),
+    ('Maria Sokolova', 'maria@slavicstudy.com', 'mariasokolova', '$2a$10$examplehash222222222222222222222222222222222222222', 'student', CURRENT_TIMESTAMP - INTERVAL '2 days'),
+    ('Oleksandr Novak', 'oleksandr@slavicstudy.com', 'oleksandrnovak', '$2a$10$examplehash333333333333333333333333333333333333333', 'student', CURRENT_TIMESTAMP - INTERVAL '3 days'),
+    ('Teacher Demo', 'teacher@slavicstudy.com', 'teacherdemo', '$2a$10$examplehash444444444444444444444444444444444444444', 'teacher', CURRENT_TIMESTAMP)
+ON CONFLICT (email) DO NOTHING;
+
+-- =====================================================
+-- 2. COURSES
+-- =====================================================
+
+INSERT INTO courses (title, description, theory)
+SELECT *
+FROM (
+    VALUES
+    (
+        'Введение в межславянский язык',
+        'Базовый курс для знакомства с межславянским языком, его историей, назначением и сферой применения.',
+        'Межславянский язык (Medžuslovjansky) — это искусственно созданный вспомогательный язык, разработанный так, чтобы быть интуитивно понятным носителям разных славянских языков без длительного предварительного обучения.'
+    ),
+    (
+        'Базовая грамматика межславянского',
+        'Курс по основам грамматики: местоимения, глаголы, существительные, порядок слов.',
+        'Грамматика межславянского языка строится на общих чертах славянских языков. В языке используются знакомые корни, упрощённые формы и относительно свободный порядок слов.'
+    ),
+    (
+        'Практика чтения и общения',
+        'Курс для закрепления навыков чтения, письма и понимания простых диалогов на межславянском языке.',
+        'Практика включает чтение адаптированных текстов, понимание базовой лексики, ответы на вопросы и составление коротких сообщений и диалогов.'
+    )
+) AS v(title, description, theory)
+WHERE NOT EXISTS (
+    SELECT 1 FROM courses c WHERE c.title = v.title
+);
+
+-- =====================================================
+-- 3. LESSONS
+-- =====================================================
+
+-- Курс 1
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Что такое межславянский язык?',
+        'В этом уроке студент знакомится с понятием межславянского языка, узнаёт, зачем он был создан и кому может быть полезен.',
+        'video_intro.mp4',
+        1
+    ),
+    (
+        'Где используется Interslavic?',
+        'Урок посвящён практическому применению языка: общение между славянами, международные проекты, интернет-сообщества, музыка и медиа.',
+        'slides_usage.pdf',
+        2
+    ),
+    (
+        'Алфавит и чтение',
+        'В уроке рассматриваются основы чтения, знакомые буквы, латиница и принципы произношения слов.',
+        'audio_alphabet.mp3',
+        3
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Введение в межславянский язык'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- Курс 2
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Личные местоимения',
+        'Изучение базовых местоимений: ja, ty, on, ona, my, vy, oni.',
+        'video_pronouns.mp4',
+        1
+    ),
+    (
+        'Глагол byti (быть)',
+        'Урок знакомит с глаголом byti и его ролью в простых предложениях.',
+        'audio_byti.mp3',
+        2
+    ),
+    (
+        'Простое предложение',
+        'Урок о том, как строятся короткие повествовательные предложения в межславянском языке.',
+        'grammar_sentence.pdf',
+        3
+    ),
+    (
+        'Базовая лексика: семья, дом, человек',
+        'Изучение часто употребляемых слов, связанных с повседневной жизнью.',
+        'cards_basic_words.pdf',
+        4
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Базовая грамматика межславянского'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- Курс 3
+INSERT INTO lessons (course_id, title, content, multimedia, position)
+SELECT c.id, l.title, l.content, l.multimedia, l.position
+FROM courses c
+JOIN (
+    VALUES
+    (
+        'Чтение простого текста',
+        'Практика чтения короткого адаптированного текста на межславянском языке.',
+        'reading_text_01.pdf',
+        1
+    ),
+    (
+        'Знакомство и приветствие',
+        'Отработка простых диалогов: приветствие, представление себя, базовые вопросы.',
+        'dialogue_intro.mp3',
+        2
+    ),
+    (
+        'Короткие ответы письменно',
+        'Практика письменных ответов на простые вопросы по теме уроков.',
+        'writing_tasks.docx',
+        3
+    )
+) AS l(title, content, multimedia, position)
+ON c.title = 'Практика чтения и общения'
+WHERE NOT EXISTS (
+    SELECT 1 FROM lessons ls
+    WHERE ls.course_id = c.id AND ls.title = l.title
+);
+
+-- =====================================================
+-- 4. TASKS
+-- task_type:
+-- 1 = Choices
+-- 2 = Write
+-- =====================================================
+
+-- -----------------------------------------------------
+-- Урок: Что такое межславянский язык?
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Для кого в первую очередь создан межславянский язык?',
+        'Для носителей славянских языков',
+        ARRAY[
+            'Для носителей славянских языков',
+            'Только для программистов',
+            'Только для жителей Польши',
+            'Для изучения японского языка'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Какова главная цель межславянского языка?',
+        'Облегчить общение между славянами',
+        ARRAY[
+            'Сделать новый тайный язык',
+            'Облегчить общение между славянами',
+            'Заменить все национальные языки',
+            'Использоваться только в школе'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши кратко, зачем нужен межславянский язык.',
+        'Для общения между носителями разных славянских языков',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Что такое межславянский язык?'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Где используется Interslavic?
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Где может использоваться межславянский язык?',
+        'В международном общении между славянами',
+        ARRAY[
+            'Только в математике',
+            'Только в военной сфере',
+            'В международном общении между славянами',
+            'Только в медицине'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши один пример, где может пригодиться Interslavic.',
+        'В общении людей из разных славянских стран',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Где используется Interslavic?'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Алфавит и чтение
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что изучается в этом уроке?',
+        'Основы чтения и алфавит',
+        ARRAY[
+            'Интегралы',
+            'Основы чтения и алфавит',
+            'История Франции',
+            'Программирование на C++'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши, почему похожесть букв помогает в изучении межславянского.',
+        'Потому что многие слова и буквы узнаваемы для славян',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Алфавит и чтение'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Личные местоимения
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какое из слов является личным местоимением?',
+        'ja',
+        ARRAY[
+            'dom',
+            'ja',
+            'dobry',
+            'pisati'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Что означает местоимение "my"?',
+        'мы',
+        ARRAY[
+            'я',
+            'он',
+            'мы',
+            'они'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши три личных местоимения на межславянском.',
+        'ja, ty, on',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Личные местоимения'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Глагол byti (быть)
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какой глагол изучается в этом уроке?',
+        'byti',
+        ARRAY[
+            'čitati',
+            'byti',
+            'govoriti',
+            'viděti'
+        ]::TEXT[]
+    ),
+    (
+        1,
+        'Что означает "byti"?',
+        'быть',
+        ARRAY[
+            'идти',
+            'быть',
+            'говорить',
+            'учиться'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши инфинитив глагола "быть" на межславянском.',
+        'byti',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Глагол byti (быть)'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Простое предложение
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Из чего состоит простое предложение?',
+        'Из подлежащего и сказуемого',
+        ARRAY[
+            'Только из одного числа',
+            'Из подлежащего и сказуемого',
+            'Только из предлогов',
+            'Только из междометий'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши простое предложение на межславянском.',
+        'Ja jesm student',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Простое предложение'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Базовая лексика: семья, дом, человек
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Какое слово ближе по теме к "семья"?',
+        'matka',
+        ARRAY[
+            'matka',
+            'pisati',
+            'modry',
+            'brzo'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши одно слово на межславянском по теме "дом" или "семья".',
+        'dom',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Базовая лексика: семья, дом, человек'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Чтение простого текста
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что развивает этот урок?',
+        'Навык чтения',
+        ARRAY[
+            'Навык чтения',
+            'Только спортивную форму',
+            'Знание химии',
+            'Навык программирования'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши, зачем полезно читать простые тексты на изучаемом языке.',
+        'Чтобы лучше понимать лексику и структуру языка',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Чтение простого текста'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Знакомство и приветствие
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Как можно перевести "Dobry den"?',
+        'Добрый день',
+        ARRAY[
+            'До свидания',
+            'Спокойной ночи',
+            'Добрый день',
+            'Спасибо'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши простое приветствие на межславянском.',
+        'Dobry den',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Знакомство и приветствие'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- -----------------------------------------------------
+-- Урок: Короткие ответы письменно
+-- -----------------------------------------------------
+INSERT INTO tasks (lesson_id, task_type, question, answer, choises)
+SELECT l.id, t.task_type, t.question, t.answer, t.choises
+FROM lessons l
+JOIN (
+    VALUES
+    (
+        1,
+        'Что тренирует этот урок?',
+        'Письменные ответы',
+        ARRAY[
+            'Письменные ответы',
+            'Футбол',
+            'Высшую математику',
+            'Монтаж видео'
+        ]::TEXT[]
+    ),
+    (
+        2,
+        'Напиши короткий ответ на вопрос "Kto ty?"',
+        'Ja jesm student',
+        ARRAY[]::TEXT[]
+    )
+) AS t(task_type, question, answer, choises)
+ON l.title = 'Короткие ответы письменно'
+WHERE NOT EXISTS (
+    SELECT 1 FROM tasks tt WHERE tt.lesson_id = l.id AND tt.question = t.question
+);
+
+-- =====================================================
+-- 5. LESSON_PROGRESS
+-- =====================================================
+
+-- Иван
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 95, CURRENT_TIMESTAMP - INTERVAL '10 days', CURRENT_TIMESTAMP - INTERVAL '11 days', CURRENT_TIMESTAMP - INTERVAL '10 days'),
+    ('Где используется Interslavic?', 'completed', 88, CURRENT_TIMESTAMP - INTERVAL '9 days', CURRENT_TIMESTAMP - INTERVAL '10 days', CURRENT_TIMESTAMP - INTERVAL '9 days'),
+    ('Алфавит и чтение', 'in_progress', 60, NULL, CURRENT_TIMESTAMP - INTERVAL '2 days', CURRENT_TIMESTAMP - INTERVAL '1 day')
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'ivan@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+-- Мария
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 100, CURRENT_TIMESTAMP - INTERVAL '8 days', CURRENT_TIMESTAMP - INTERVAL '9 days', CURRENT_TIMESTAMP - INTERVAL '8 days'),
+    ('Личные местоимения', 'completed', 92, CURRENT_TIMESTAMP - INTERVAL '5 days', CURRENT_TIMESTAMP - INTERVAL '6 days', CURRENT_TIMESTAMP - INTERVAL '5 days'),
+    ('Глагол byti (быть)', 'in_progress', 55, NULL, CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP - INTERVAL '6 hours')
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'maria@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+-- Oleksandr
+INSERT INTO lesson_progress (user_id, lesson_id, status, score, completion_date, started_at, updated_at)
+SELECT u.id, l.id, p.status, p.score, p.completion_date, p.started_at, p.updated_at
+FROM users u
+CROSS JOIN lessons l
+JOIN (
+    VALUES
+    ('Что такое межславянский язык?', 'completed', 85, CURRENT_TIMESTAMP - INTERVAL '7 days', CURRENT_TIMESTAMP - INTERVAL '8 days', CURRENT_TIMESTAMP - INTERVAL '7 days'),
+    ('Чтение простого текста', 'in_progress', 40, NULL, CURRENT_TIMESTAMP - INTERVAL '12 hours', CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+    ('Знакомство и приветствие', 'not_started', 0, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+) AS p(lesson_title, status, score, completion_date, started_at, updated_at)
+ON l.title = p.lesson_title
+WHERE u.email = 'oleksandr@slavicstudy.com'
+AND NOT EXISTS (
+    SELECT 1 FROM lesson_progress lp
+    WHERE lp.user_id = u.id AND lp.lesson_id = l.id
+);
+
+COMMIT;
+
+==========================================
 ФАЙЛ: docker-compose.yml
 ==========================================
 
@@ -371,10 +1705,2167 @@ volumes:
   interslavic_data:    
 
 ==========================================
-ФАЙЛ: internal/database/postgres.go
+ФАЙЛ: docs/docs.go
 ==========================================
 
-package database
+// Package docs Code generated by swaggo/swag. DO NOT EDIT
+package docs
+
+import "github.com/swaggo/swag"
+
+const docTemplate = `{
+    "schemes": {{ marshal .Schemes }},
+    "swagger": "2.0",
+    "info": {
+        "description": "{{escape .Description}}",
+        "title": "{{.Title}}",
+        "contact": {},
+        "version": "{{.Version}}"
+    },
+    "host": "{{.Host}}",
+    "basePath": "{{.BasePath}}",
+    "paths": {
+        "/api/auth/login": {
+            "post": {
+                "description": "Login with login and password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login user",
+                "parameters": [
+                    {
+                        "description": "Login credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get current authenticated user info",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/refresh": {
+            "post": {
+                "description": "Get new access token using refresh token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh access token",
+                "parameters": [
+                    {
+                        "description": "Refresh token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.TokenPair"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register": {
+            "post": {
+                "description": "Register new user with email, login and password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Register new user",
+                "parameters": [
+                    {
+                        "description": "User registration data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses": {
+            "get": {
+                "description": "Get list of all available courses",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get all courses",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Course"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses/{id}": {
+            "get": {
+                "description": "Get course details by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get course by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Course ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Course"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses/{id}/lessons": {
+            "get": {
+                "description": "Get all lessons of a specific course",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get lessons by course ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Course ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Lesson"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}": {
+            "get": {
+                "description": "Get lesson details by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get lesson by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Lesson"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}/full": {
+            "get": {
+                "description": "Get lesson details and all its tasks",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get lesson with tasks",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.LessonWithTasks"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}/tasks": {
+            "get": {
+                "description": "Get all tasks of a specific lesson",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get tasks by lesson ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Task"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/check": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Check if the provided answer is correct",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Check task answer",
+                "parameters": [
+                    {
+                        "description": "Answer to check",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.CheckAnswerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.CheckAnswerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "auth.TokenPair": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Course": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "theory": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Lesson": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "course_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "multimedia": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Task": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "choises": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lesson_id": {
+                    "type": "integer"
+                },
+                "question": {
+                    "type": "string"
+                },
+                "task_type": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.User": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "fullname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_login": {
+                    "type": "string"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "reg_date": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.AuthResponse": {
+            "type": "object",
+            "properties": {
+                "tokens": {
+                    "$ref": "#/definitions/auth.TokenPair"
+                },
+                "user": {
+                    "$ref": "#/definitions/models.User"
+                }
+            }
+        },
+        "usecases.CheckAnswerRequest": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usecases.CheckAnswerResponse": {
+            "type": "object",
+            "properties": {
+                "is_correct": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.LessonWithTasks": {
+            "type": "object",
+            "properties": {
+                "lesson": {
+                    "$ref": "#/definitions/models.Lesson"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Task"
+                    }
+                }
+            }
+        },
+        "usecases.LoginRequest": {
+            "type": "object",
+            "properties": {
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.RegisterRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "fullname": {
+                    "type": "string"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}`
+
+// SwaggerInfo holds exported Swagger Info so clients can modify it
+var SwaggerInfo = &swag.Spec{
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
+	Schemes:          []string{},
+	Title:            "",
+	Description:      "",
+	InfoInstanceName: "swagger",
+	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
+}
+
+func init() {
+	swag.Register(SwaggerInfo.InstanceName(), SwaggerInfo)
+}
+
+
+==========================================
+ФАЙЛ: docs/swagger.json
+==========================================
+
+{
+    "swagger": "2.0",
+    "info": {
+        "contact": {}
+    },
+    "paths": {
+        "/api/auth/login": {
+            "post": {
+                "description": "Login with login and password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Login user",
+                "parameters": [
+                    {
+                        "description": "Login credentials",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.LoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get current authenticated user info",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.User"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/refresh": {
+            "post": {
+                "description": "Get new access token using refresh token",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh access token",
+                "parameters": [
+                    {
+                        "description": "Refresh token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth.TokenPair"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register": {
+            "post": {
+                "description": "Register new user with email, login and password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Register new user",
+                "parameters": [
+                    {
+                        "description": "User registration data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.RegisterRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.AuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses": {
+            "get": {
+                "description": "Get list of all available courses",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get all courses",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Course"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses/{id}": {
+            "get": {
+                "description": "Get course details by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get course by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Course ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Course"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/courses/{id}/lessons": {
+            "get": {
+                "description": "Get all lessons of a specific course",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "courses"
+                ],
+                "summary": "Get lessons by course ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Course ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Lesson"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}": {
+            "get": {
+                "description": "Get lesson details by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get lesson by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.Lesson"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}/full": {
+            "get": {
+                "description": "Get lesson details and all its tasks",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get lesson with tasks",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.LessonWithTasks"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/lessons/{id}/tasks": {
+            "get": {
+                "description": "Get all tasks of a specific lesson",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lessons"
+                ],
+                "summary": "Get tasks by lesson ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Lesson ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.Task"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tasks/check": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Check if the provided answer is correct",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Check task answer",
+                "parameters": [
+                    {
+                        "description": "Answer to check",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecases.CheckAnswerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/usecases.CheckAnswerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "auth.TokenPair": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Course": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "theory": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Lesson": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "course_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "multimedia": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.Task": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "choises": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lesson_id": {
+                    "type": "integer"
+                },
+                "question": {
+                    "type": "string"
+                },
+                "task_type": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.User": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "fullname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_login": {
+                    "type": "string"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "reg_date": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.AuthResponse": {
+            "type": "object",
+            "properties": {
+                "tokens": {
+                    "$ref": "#/definitions/auth.TokenPair"
+                },
+                "user": {
+                    "$ref": "#/definitions/models.User"
+                }
+            }
+        },
+        "usecases.CheckAnswerRequest": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usecases.CheckAnswerResponse": {
+            "type": "object",
+            "properties": {
+                "is_correct": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.LessonWithTasks": {
+            "type": "object",
+            "properties": {
+                "lesson": {
+                    "$ref": "#/definitions/models.Lesson"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Task"
+                    }
+                }
+            }
+        },
+        "usecases.LoginRequest": {
+            "type": "object",
+            "properties": {
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecases.RegisterRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "fullname": {
+                    "type": "string"
+                },
+                "login": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
+
+==========================================
+ФАЙЛ: docs/swagger.yaml
+==========================================
+
+definitions:
+  auth.TokenPair:
+    properties:
+      access_token:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+    type: object
+  models.Course:
+    properties:
+      description:
+        type: string
+      id:
+        type: integer
+      theory:
+        type: string
+      title:
+        type: string
+    type: object
+  models.Lesson:
+    properties:
+      content:
+        type: string
+      course_id:
+        type: integer
+      id:
+        type: integer
+      multimedia:
+        type: string
+      position:
+        type: integer
+      title:
+        type: string
+    type: object
+  models.Task:
+    properties:
+      answer:
+        type: string
+      choises:
+        items:
+          type: string
+        type: array
+      id:
+        type: integer
+      lesson_id:
+        type: integer
+      question:
+        type: string
+      task_type:
+        type: integer
+    type: object
+  models.User:
+    properties:
+      email:
+        type: string
+      fullname:
+        type: string
+      id:
+        type: integer
+      last_login:
+        type: string
+      login:
+        type: string
+      reg_date:
+        type: string
+      role:
+        type: string
+    type: object
+  usecases.AuthResponse:
+    properties:
+      tokens:
+        $ref: '#/definitions/auth.TokenPair'
+      user:
+        $ref: '#/definitions/models.User'
+    type: object
+  usecases.CheckAnswerRequest:
+    properties:
+      answer:
+        type: string
+      task_id:
+        type: integer
+    type: object
+  usecases.CheckAnswerResponse:
+    properties:
+      is_correct:
+        type: boolean
+      message:
+        type: string
+    type: object
+  usecases.LessonWithTasks:
+    properties:
+      lesson:
+        $ref: '#/definitions/models.Lesson'
+      tasks:
+        items:
+          $ref: '#/definitions/models.Task'
+        type: array
+    type: object
+  usecases.LoginRequest:
+    properties:
+      login:
+        type: string
+      password:
+        type: string
+    type: object
+  usecases.RegisterRequest:
+    properties:
+      email:
+        type: string
+      fullname:
+        type: string
+      login:
+        type: string
+      password:
+        type: string
+      role:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Login with login and password
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Login user
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: Get current authenticated user info
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.User'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get current user
+      tags:
+      - auth
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Get new access token using refresh token
+      parameters:
+      - description: Refresh token
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth.TokenPair'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Refresh access token
+      tags:
+      - auth
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Register new user with email, login and password
+      parameters:
+      - description: User registration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.AuthResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Register new user
+      tags:
+      - auth
+  /api/courses:
+    get:
+      description: Get list of all available courses
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Course'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get all courses
+      tags:
+      - courses
+  /api/courses/{id}:
+    get:
+      description: Get course details by ID
+      parameters:
+      - description: Course ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Course'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get course by ID
+      tags:
+      - courses
+  /api/courses/{id}/lessons:
+    get:
+      description: Get all lessons of a specific course
+      parameters:
+      - description: Course ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Lesson'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lessons by course ID
+      tags:
+      - courses
+  /api/lessons/{id}:
+    get:
+      description: Get lesson details by ID
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Lesson'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lesson by ID
+      tags:
+      - lessons
+  /api/lessons/{id}/full:
+    get:
+      description: Get lesson details and all its tasks
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.LessonWithTasks'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get lesson with tasks
+      tags:
+      - lessons
+  /api/lessons/{id}/tasks:
+    get:
+      description: Get all tasks of a specific lesson
+      parameters:
+      - description: Lesson ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get tasks by lesson ID
+      tags:
+      - lessons
+  /api/tasks/check:
+    post:
+      consumes:
+      - application/json
+      description: Check if the provided answer is correct
+      parameters:
+      - description: Answer to check
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/usecases.CheckAnswerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/usecases.CheckAnswerResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check task answer
+      tags:
+      - tasks
+swagger: "2.0"
+
+
+==========================================
+ФАЙЛ: internal/auth/jwt.go
+==========================================
+
+package auth
+
+import (
+	"errors"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+type JWTConfig struct {
+	SecretKey     string
+	AccessExpire  time.Duration
+	RefreshExpire time.Duration
+}
+
+type Claims struct {
+	UserID int    `json:"user_id"`
+	Login  string `json:"login"`
+	Role   string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+type TokenPair struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+}
+
+func NewJWTConfig(secretKey string) *JWTConfig {
+	return &JWTConfig{
+		SecretKey:     secretKey,
+		AccessExpire:  time.Hour * 24,     // 24 hours
+		RefreshExpire: time.Hour * 24 * 7, // 7 days
+	}
+}
+
+func (j *JWTConfig) GenerateTokenPair(userID int, login, role string) (*TokenPair, error) {
+	accessToken, err := j.generateToken(userID, login, role, j.AccessExpire)
+	if err != nil {
+		return nil, err
+	}
+
+	refreshToken, err := j.generateToken(userID, login, role, j.RefreshExpire)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TokenPair{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    int64(j.AccessExpire.Seconds()),
+	}, nil
+}
+
+func (j *JWTConfig) generateToken(userID int, login, role string, expire time.Duration) (string, error) {
+	claims := Claims{
+		UserID: userID,
+		Login:  login,
+		Role:   role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expire)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(j.SecretKey))
+}
+
+func (j *JWTConfig) ValidateToken(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(j.SecretKey), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token")
+}
+
+
+==========================================
+ФАЙЛ: internal/database/postgres/course_repository.go
+==========================================
+
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+)
+
+type CourseRepository struct {
+	db *sql.DB
+}
+
+func NewCourseRepository(db *sql.DB) database.CourseRepository {
+	return &CourseRepository{db: db}
+}
+
+func (r *CourseRepository) FindAll(ctx context.Context) ([]models.Course, error) {
+	query := `SELECT id, title, description, theory FROM courses ORDER BY id`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var courses []models.Course
+	for rows.Next() {
+		var course models.Course
+		err := rows.Scan(&course.ID, &course.Title, &course.Description, &course.Theory)
+		if err != nil {
+			return nil, err
+		}
+		courses = append(courses, course)
+	}
+
+	return courses, rows.Err()
+}
+
+func (r *CourseRepository) FindByID(ctx context.Context, id int) (*models.Course, error) {
+	query := `SELECT id, title, description, theory FROM courses WHERE id = $1`
+
+	var course models.Course
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&course.ID,
+		&course.Title,
+		&course.Description,
+		&course.Theory,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &course, nil
+}
+
+
+==========================================
+ФАЙЛ: internal/database/postgres/lesson_repository.go
+==========================================
+
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+)
+
+type LessonRepository struct {
+	db *sql.DB
+}
+
+func NewLessonRepository(db *sql.DB) database.LessonRepository {
+	return &LessonRepository{db: db}
+}
+
+func (r *LessonRepository) FindByID(ctx context.Context, id int) (*models.Lesson, error) {
+	query := `SELECT id, course_id, title, content, multimedia, position 
+	          FROM lessons 
+	          WHERE id = $1`
+
+	var lesson models.Lesson
+	var position int
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&lesson.ID,
+		&lesson.CourseID,
+		&lesson.Title,
+		&lesson.Content,
+		&lesson.Multimedia,
+		&position,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	lesson.Position = position
+	return &lesson, nil
+}
+
+func (r *LessonRepository) FindByCourseID(ctx context.Context, courseID int) ([]models.Lesson, error) {
+	query := `SELECT id, course_id, title, content, multimedia, position 
+	          FROM lessons 
+	          WHERE course_id = $1 
+	          ORDER BY position`
+
+	rows, err := r.db.QueryContext(ctx, query, courseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var lessons []models.Lesson
+	for rows.Next() {
+		var lesson models.Lesson
+		var position int
+		err := rows.Scan(&lesson.ID, &lesson.CourseID, &lesson.Title, &lesson.Content, &lesson.Multimedia, &position)
+		if err != nil {
+			return nil, err
+		}
+		lesson.Position = position
+		lessons = append(lessons, lesson)
+	}
+
+	return lessons, rows.Err()
+}
+
+
+==========================================
+ФАЙЛ: internal/database/postgres/postgres.go
+==========================================
+
+package postgres
 
 import (
 	"context"
@@ -385,6 +3876,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"go.uber.org/fx"
 )
 
 func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
@@ -400,15 +3892,12 @@ func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
 		panic(err)
 	}
 
-	// See "Important settings" section.
 	db.SetConnMaxLifetime(time.Minute * 3)
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(10)
 
 	return db
 }
-
-// -----------[TRANSACTION MANAGER]-----------
 
 type PostgresTrManager struct {
 	db        *sql.DB
@@ -420,8 +3909,6 @@ func NewPostgresTrManager(db *sql.DB) *PostgresTrManager {
 		db: db,
 	}
 }
-
-// ...........[service structures]...........
 
 type txKey struct{}
 
@@ -470,8 +3957,6 @@ func (m *PostgresTrManager) GetCurrentTr(ctx context.Context) *sql.Tx {
 	return nil
 }
 
-// ...........[transaction structures]...........
-
 type Transaction interface {
 	IsActive() bool
 	Commit(context.Context) error
@@ -503,44 +3988,245 @@ func (t *sqlTransaction) Rollback(ctx context.Context) error {
 	return nil
 }
 
-/*
-type Settings interface {
-	// EnrichBy fills nil properties from external Settings.
-	EnrichBy(external Settings) Settings
+// PostgresModule
+var PostgresModule = fx.Module("postgres",
+	fx.Provide(
+		NewPostgres,
+		NewUserRepository,
+		NewCourseRepository,
+		NewLessonRepository,
+		NewTaskRepository,
+	),
+)
 
-	// CtxKey returns trm.CtxKey for the trm.Transaction.
-	CtxKey() CtxKey
-	CtxKeyOrNil() *CtxKey
-	SetCtxKey(*CtxKey) Settings
+==========================================
+ФАЙЛ: internal/database/postgres/task_repository.go
+==========================================
 
-	// Propagation returns trm.Propagation.
-		Propagation() Propagation
-	PropagationOrNil() *Propagation
-	SetPropagation(*Propagation) Settings
+package postgres
 
-	// Cancelable defines that parent trm.Transaction can cancel child trm.Transaction or goroutines.
-	Cancelable() bool
-	CancelableOrNil() *bool
-	SetCancelable(*bool) Settings
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+)
 
-	// TimeoutOrNil returns time.Duration of the trm.Transaction.
-	TimeoutOrNil() *time.Duration
-	SetTimeout(*time.Duration) Settings
+type TaskRepository struct {
+	db *sql.DB
 }
 
-type СtxManager interface {
-	// Default gets Transaction from context.Context by default CtxKey.
-	Default(ctx context.Context) Transaction
-	// SetDefault sets.Transaction in context.Context by default CtxKey.
-	SetDefault(ctx context.Context, t Transaction) context.Context
-
-	// ByKey gets Transaction from context.Context by CtxKey.
-	ByKey(ctx context.Context, key CtxKey) Transaction
-	// SetByKey sets Transaction in context.Context by.CtxKey.
-	SetByKey(ctx context.Context, key CtxKey, t Transaction) context.Context
+func NewTaskRepository(db *sql.DB) database.TaskRepository {
+	return &TaskRepository{db: db}
 }
-*/
 
+func (r *TaskRepository) FindByID(ctx context.Context, id int) (*models.Task, error) {
+	query := `SELECT id, lesson_id, task_type, question, answer, choises 
+	          FROM tasks 
+	          WHERE id = $1`
+
+	var task models.Task
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&task.ID,
+		&task.LessonID,
+		&task.TaskType,
+		&task.Question,
+		&task.Answer,
+		&task.Choises,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &task, nil
+}
+
+func (r *TaskRepository) FindByLessonID(ctx context.Context, lessonID int) ([]models.Task, error) {
+	query := `SELECT id, lesson_id, task_type, question, answer, choises 
+	          FROM tasks 
+	          WHERE lesson_id = $1 
+	          ORDER BY id`
+
+	rows, err := r.db.QueryContext(ctx, query, lessonID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+	for rows.Next() {
+		var task models.Task
+		err := rows.Scan(&task.ID, &task.LessonID, &task.TaskType, &task.Question, &task.Answer, &task.Choises)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, rows.Err()
+}
+
+func (r *TaskRepository) CheckAnswer(ctx context.Context, taskID int, answer string) (bool, error) {
+	task, err := r.FindByID(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if task == nil {
+		return false, errors.New("task not found")
+	}
+
+	// Проверка ответа (можно добавить нормализацию для WriteTask)
+	return answer == task.Answer, nil
+}
+
+==========================================
+ФАЙЛ: internal/database/postgres/user_repository.go
+==========================================
+
+
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"interslavic/internal/models"
+	datab "interslavic/internal/database"
+	
+)
+
+type UserRepository struct {
+	db *sql.DB
+}
+
+func NewUserRepository(db *sql.DB) datab.UserRepository {
+	return &UserRepository{db: db}
+}
+
+func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
+	query := `
+		INSERT INTO users (fullname, email, login, password, role)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, reg_date
+	`
+
+	err := r.db.QueryRowContext(ctx, query,
+		user.Fullname,
+		user.Email,
+		user.Login,
+		user.Password,
+		user.Role,
+	).Scan(&user.ID, &user.RegDate)
+
+	return err
+}
+
+func (r *UserRepository) FindByLogin(ctx context.Context, login string) (*models.User, error) {
+	query := `
+		SELECT id, fullname, email, login, password, role, reg_date, last_login
+		FROM users
+		WHERE login = $1
+	`
+
+	var user models.User
+	err := r.db.QueryRowContext(ctx, query, login).Scan(
+		&user.ID,
+		&user.Fullname,
+		&user.Email,
+		&user.Login,
+		&user.Password,
+		&user.Role,
+		&user.RegDate,
+		&user.LastLogin,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, errors.New("user not found")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+	query := `
+		SELECT id, fullname, email, login, password, role, reg_date, last_login
+		FROM users
+		WHERE email = $1
+	`
+
+	var user models.User
+	err := r.db.QueryRowContext(ctx, query, email).Scan(
+		&user.ID,
+		&user.Fullname,
+		&user.Email,
+		&user.Login,
+		&user.Password,
+		&user.Role,
+		&user.RegDate,
+		&user.LastLogin,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, errors.New("user not found")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) FindByID(ctx context.Context, id int) (*models.User, error) {
+	query := `
+		SELECT id, fullname, email, login, password, role, reg_date, last_login
+		FROM users
+		WHERE id = $1
+	`
+
+	var user models.User
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&user.ID,
+		&user.Fullname,
+		&user.Email,
+		&user.Login,
+		&user.Password,
+		&user.Role,
+		&user.RegDate,
+		&user.LastLogin,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, errors.New("user not found")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID int) error {
+	query := `
+		UPDATE users
+		SET last_login = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`
+
+	_, err := r.db.ExecContext(ctx, query, userID)
+	return err
+}
 
 ==========================================
 ФАЙЛ: internal/database/repository.go
@@ -551,7 +4237,7 @@ package database
 import (
 	"context"
 	"database/sql"
-	"interslavic/logging"
+	"interslavic/internal/models"
 )
 
 // [SERVICE INTERFACES]
@@ -560,14 +4246,805 @@ type TrManager interface {
 	Begin(context.Context) (context.Context, error)
 	Commit(context.Context) error
 	Rollback(context.Context) error
-	GetCurrentTr(context.Context) *sql.Tx // WARNING: NOT UNIQUE FOR ALL DRIVERS!
+	GetCurrentTr(context.Context) *sql.Tx
 }
 
-type Repository struct {
+type UserRepository interface {
+	Create(ctx context.Context, user *models.User) error
+	FindByLogin(ctx context.Context, login string) (*models.User, error)
+	FindByEmail(ctx context.Context, email string) (*models.User, error)
+	FindByID(ctx context.Context, id int) (*models.User, error)
+	UpdateLastLogin(ctx context.Context, userID int) error
 }
 
-func NewRepository(db *sql.DB, logger *logging.ModuleLogger) *Repository {
-	return &Repository{}
+type CourseRepository interface {
+	FindAll(ctx context.Context) ([]models.Course, error)
+	FindByID(ctx context.Context, id int) (*models.Course, error)
+}
+
+type LessonRepository interface {
+	FindByID(ctx context.Context, id int) (*models.Lesson, error)
+	FindByCourseID(ctx context.Context, courseID int) ([]models.Lesson, error)
+}
+
+type TaskRepository interface {
+	FindByID(ctx context.Context, id int) (*models.Task, error)
+	FindByLessonID(ctx context.Context, lessonID int) ([]models.Task, error)
+	CheckAnswer(ctx context.Context, taskID int, answer string) (bool, error)
+}
+
+==========================================
+ФАЙЛ: internal/http/fiberfx.go
+==========================================
+
+package http
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"interslavic/config"
+
+	"github.com/gofiber/contrib/swagger"
+	"go.uber.org/fx"
+)
+
+// New returns new *fiber.App with fx lifecycle hooks
+func New(cfg *config.Config) *fiber.App {
+	app := fiber.New(fiber.Config{
+		//ReadTimeout:           10 * time.Second,
+		DisableStartupMessage:        true,
+		DisablePreParseMultipartForm: true,
+		BodyLimit:                    4 * 1024 * 1024,
+	})
+
+	// swagger
+	swagCfg := swagger.Config{
+		BasePath: "/",
+		FilePath: "./docs/swagger.json",
+		Path:     "swagger",
+		Title:    "Swagger API Docs",
+	}
+
+	app.Use(swagger.New(swagCfg))
+
+	// cors
+	app.Use(cors.New(cors.Config{
+		AllowCredentials: true,
+		AllowOrigins:     fmt.Sprintf("http://127.0.0.1:%s", cfg.HTTP.Port),
+		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
+		AllowHeaders:     "Accept, Authorization, Content-Type, X-CSRF-Token",
+		ExposeHeaders:    "Content-Type",
+	}))
+
+	return app
+}
+
+// Listen starts *fiber.App and appends fx.Lifecycle hooks for graceful shutdown
+func Listen(lc fx.Lifecycle, app *fiber.App, cfg *config.Config) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			go func() {
+				if err := app.Listen(":" + cfg.HTTP.Port); err != nil {
+					log.Fatal(err)
+				}
+			}()
+			return nil
+		},
+
+		OnStop: func(ctx context.Context) error {
+			// Shutdown gracefully shuts down the server without interrupting any active connections.
+			// Shutdown works by first closing all open listeners and then
+			// waits indefinitely for all connections to return to idle before shutting down.
+			return app.ShutdownWithContext(ctx)
+		},
+	})
+}
+
+// Module provides fiber.App and adds lifecycle hooks for graceful shutdown
+var Module = fx.Module("fiber",
+	fx.Provide(
+		New,
+	),
+	fx.Invoke(
+		Listen,
+	),
+
+	APIModule,
+)
+
+
+==========================================
+ФАЙЛ: internal/http/handler.go
+==========================================
+
+package http
+
+import (
+	"interslavic/internal/auth"
+	"interslavic/internal/http/handlers"
+	"interslavic/internal/http/middlewares"
+	usecase "interslavic/internal/usecases"
+	"interslavic/logging"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+	"go.uber.org/fx"
+)
+
+// New /api/ Router
+func NewRouter(app *fiber.App) fiber.Router {
+	return app.Group("/api/")
+}
+
+// Register `/api` routes
+func Register(
+	router fiber.Router,
+	logger *logging.ModuleLogger,
+	authUseCase *usecase.AuthUseCase,
+	courseUseCase *usecase.CourseUseCase,
+	lessonUseCase *usecase.LessonUseCase,
+	taskUseCase *usecase.TaskUseCase,
+	jwtCfg *auth.JWTConfig,
+) {
+	mlogger := logging.NewModuleLogger("HTTP", "ROUTER", logger)
+	mlogger.Info("register http api router")
+
+	router.Use(middlewares.NewLoggingMiddleware(mlogger))
+	router.Use(recover.New())
+	router.Get("/healthy", func(ctx *fiber.Ctx) error { return ctx.SendStatus(fiber.StatusOK) })
+
+	// Auth routes
+	authHandler := handlers.NewAuthHandler(authUseCase)
+	authGroup := router.Group("/auth")
+	{
+		authGroup.Post("/login", authHandler.Login)
+		authGroup.Post("/register", authHandler.Register)
+		authGroup.Post("/refresh", authHandler.RefreshToken)
+
+		// Protected auth routes
+		protectedAuth := authGroup.Use(middlewares.JWTAuthMiddleware(jwtCfg))
+		protectedAuth.Get("/me", authHandler.GetCurrentUser)
+	}
+
+	// Course routes
+	courseHandler := handlers.NewCourseHandler(courseUseCase)
+	courseGroup := router.Group("/courses")
+	{
+		courseGroup.Get("/", courseHandler.GetAllCourses)
+		courseGroup.Get("/:id", courseHandler.GetCourseByID)
+	}
+
+	// Lesson routes
+	lessonHandler := handlers.NewLessonHandler(lessonUseCase)
+	
+	// Lessons by course
+	courseGroup.Get("/:id/lessons", lessonHandler.GetCourseLessons)
+	
+	// Lesson endpoints
+	lessonGroup := router.Group("/lessons")
+	{
+		lessonGroup.Get("/:id", lessonHandler.GetLessonByID)
+		lessonGroup.Get("/:id/full", lessonHandler.GetLessonWithTasks)
+	}
+
+	// Task routes
+	taskHandler := handlers.NewTaskHandler(taskUseCase)
+	
+	// Tasks by lesson
+	lessonGroup.Get("/:id/tasks", taskHandler.GetLessonTasks)
+	
+	// Task check (protected)
+	taskGroup := router.Group("/tasks").Use(middlewares.JWTAuthMiddleware(jwtCfg))
+	{
+		taskGroup.Post("/check", taskHandler.CheckTaskAnswer)
+	}
+}
+
+// APIModule provides fiber.Router api and register controllers
+var APIModule = fx.Module("http",
+	fx.Provide(NewRouter),
+	fx.Invoke(
+		Register,
+	),
+)
+
+==========================================
+ФАЙЛ: internal/http/handlers/auth_handler.go
+==========================================
+
+package handlers
+
+import (
+	"interslavic/internal/usecases"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type AuthHandler struct {
+	authUseCase *usecases.AuthUseCase
+}
+
+func NewAuthHandler(authUseCase *usecases.AuthUseCase) *AuthHandler {
+	return &AuthHandler{
+		authUseCase: authUseCase,
+	}
+}
+
+// Login godoc
+// @Summary Login user
+// @Description Login with login and password
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body usecases.LoginRequest true "Login credentials"
+// @Success 200 {object} usecases.AuthResponse
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /api/auth/login [post]
+func (h *AuthHandler) Login(c *fiber.Ctx) error {
+	var req usecases.LoginRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if req.Login == "" || req.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "login and password are required",
+		})
+	}
+
+	resp, err := h.authUseCase.Login(c.UserContext(), &req)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// Register godoc
+// @Summary Register new user
+// @Description Register new user with email, login and password
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body usecases.RegisterRequest true "User registration data"
+// @Success 200 {object} usecases.AuthResponse
+// @Failure 400 {object} map[string]string
+// @Failure 409 {object} map[string]string
+// @Router /api/auth/register [post]
+func (h *AuthHandler) Register(c *fiber.Ctx) error {
+	var req usecases.RegisterRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if req.Fullname == "" || req.Email == "" || req.Login == "" || req.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "all fields are required",
+		})
+	}
+
+	resp, err := h.authUseCase.Register(c.UserContext(), &req)
+	if err != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// RefreshToken godoc
+// @Summary Refresh access token
+// @Description Get new access token using refresh token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body map[string]string true "Refresh token"
+// @Success 200 {object} auth.TokenPair
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /api/auth/refresh [post]
+func (h *AuthHandler) RefreshToken(c *fiber.Ctx) error {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if req.RefreshToken == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "refresh token is required",
+		})
+	}
+
+	tokenPair, err := h.authUseCase.RefreshToken(c.UserContext(), req.RefreshToken)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(tokenPair)
+}
+
+// GetCurrentUser godoc
+// @Summary Get current user
+// @Description Get current authenticated user info
+// @Tags auth
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} models.User
+// @Failure 401 {object} map[string]string
+// @Router /api/auth/me [get]
+func (h *AuthHandler) GetCurrentUser(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(int)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "user not authenticated",
+		})
+	}
+
+	user, err := h.authUseCase.GetUserByID(c.UserContext(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "user not found",
+		})
+	}
+
+	user.Password = ""
+
+	return c.JSON(user)
+}
+
+
+==========================================
+ФАЙЛ: internal/http/handlers/course_handler.go
+==========================================
+
+package handlers
+
+import (
+	"interslavic/internal/usecases"
+	"strconv"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type CourseHandler struct {
+	courseUseCase *usecases.CourseUseCase
+}
+
+func NewCourseHandler(courseUseCase *usecases.CourseUseCase) *CourseHandler {
+	return &CourseHandler{
+		courseUseCase: courseUseCase,
+	}
+}
+
+// GetAllCourses godoc
+// @Summary Get all courses
+// @Description Get list of all available courses
+// @Tags courses
+// @Produce json
+// @Success 200 {array} models.Course
+// @Failure 500 {object} map[string]string
+// @Router /api/courses [get]
+func (h *CourseHandler) GetAllCourses(c *fiber.Ctx) error {
+	courses, err := h.courseUseCase.GetAllCourses(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(courses)
+}
+
+// GetCourseByID godoc
+// @Summary Get course by ID
+// @Description Get course details by ID
+// @Tags courses
+// @Produce json
+// @Param id path int true "Course ID"
+// @Success 200 {object} models.Course
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/courses/{id} [get]
+func (h *CourseHandler) GetCourseByID(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid course id",
+		})
+	}
+
+	course, err := h.courseUseCase.GetCourseByID(c.UserContext(), id)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(course)
+}
+
+
+==========================================
+ФАЙЛ: internal/http/handlers/lesson_handler.go
+==========================================
+
+package handlers
+
+import (
+	"interslavic/internal/usecases"
+	"strconv"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type LessonHandler struct {
+	lessonUseCase *usecases.LessonUseCase
+}
+
+func NewLessonHandler(lessonUseCase *usecases.LessonUseCase) *LessonHandler {
+	return &LessonHandler{
+		lessonUseCase: lessonUseCase,
+	}
+}
+
+// GetLessonByID godoc
+// @Summary Get lesson by ID
+// @Description Get lesson details by ID
+// @Tags lessons
+// @Produce json
+// @Param id path int true "Lesson ID"
+// @Success 200 {object} models.Lesson
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/lessons/{id} [get]
+func (h *LessonHandler) GetLessonByID(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid lesson id",
+		})
+	}
+
+	lesson, err := h.lessonUseCase.GetLessonByID(c.UserContext(), id)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(lesson)
+}
+
+// GetCourseLessons godoc
+// @Summary Get lessons by course ID
+// @Description Get all lessons of a specific course
+// @Tags courses
+// @Produce json
+// @Param id path int true "Course ID"
+// @Success 200 {array} models.Lesson
+// @Failure 500 {object} map[string]string
+// @Router /api/courses/{id}/lessons [get]
+func (h *LessonHandler) GetCourseLessons(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid course id",
+		})
+	}
+
+	lessons, err := h.lessonUseCase.GetLessonsByCourseID(c.UserContext(), id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(lessons)
+}
+
+// GetLessonWithTasks godoc
+// @Summary Get lesson with tasks
+// @Description Get lesson details and all its tasks
+// @Tags lessons
+// @Produce json
+// @Param id path int true "Lesson ID"
+// @Success 200 {object} usecases.LessonWithTasks
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/lessons/{id}/full [get]
+func (h *LessonHandler) GetLessonWithTasks(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid lesson id",
+		})
+	}
+
+	lessonWithTasks, err := h.lessonUseCase.GetLessonWithTasks(c.UserContext(), id)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(lessonWithTasks)
+}
+
+==========================================
+ФАЙЛ: internal/http/handlers/task_handler.go
+==========================================
+
+package handlers
+
+import (
+	"interslavic/internal/usecases"
+	"strconv"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type TaskHandler struct {
+	taskUseCase *usecases.TaskUseCase
+}
+
+func NewTaskHandler(taskUseCase *usecases.TaskUseCase) *TaskHandler {
+	return &TaskHandler{
+		taskUseCase: taskUseCase,
+	}
+}
+
+// GetLessonTasks godoc
+// @Summary Get tasks by lesson ID
+// @Description Get all tasks of a specific lesson
+// @Tags lessons
+// @Produce json
+// @Param id path int true "Lesson ID"
+// @Success 200 {array} models.Task
+// @Failure 500 {object} map[string]string
+// @Router /api/lessons/{id}/tasks [get]
+func (h *TaskHandler) GetLessonTasks(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid lesson id",
+		})
+	}
+
+	tasks, err := h.taskUseCase.GetTasksByLessonID(c.UserContext(), id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	return c.JSON(tasks)
+}
+
+// CheckTaskAnswer godoc
+// @Summary Check task answer
+// @Description Check if the provided answer is correct
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body usecases.CheckAnswerRequest true "Answer to check"
+// @Success 200 {object} usecases.CheckAnswerResponse
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /api/tasks/check [post]
+func (h *TaskHandler) CheckTaskAnswer(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(int)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "user not authenticated",
+		})
+	}
+
+	var req usecases.CheckAnswerRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if req.TaskID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "task_id is required",
+		})
+	}
+
+	// Используем userID для логирования, но пока не сохраняем результат
+	_ = userID
+
+	resp, err := h.taskUseCase.CheckAnswer(c.UserContext(), req.TaskID, req.Answer)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+
+==========================================
+ФАЙЛ: internal/http/middlewares/authorization.go
+==========================================
+
+package middlewares
+
+import (
+	"interslavic/config"
+	"net/http"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+// NewMiddleware return request logging handler
+func NewAdminAuthorizationMiddleware(cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Method() == http.MethodOptions {
+			return c.Next()
+		}
+
+		key := c.Request().Header.Peek("Authorization")
+		if string(key) != cfg.HTTP.AuthorizationKey {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+
+		return c.Next()
+	}
+}
+
+
+==========================================
+ФАЙЛ: internal/http/middlewares/jwt_authorization.go
+==========================================
+
+// internal/http/middlewares/jwt_auth.go
+package middlewares
+
+import (
+	"strings"
+	"interslavic/internal/auth"
+	"github.com/gofiber/fiber/v2"
+)
+
+func JWTAuthMiddleware(jwtCfg *auth.JWTConfig) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Method() == fiber.MethodOptions {
+			return c.Next()
+		}
+
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "missing authorization header",
+			})
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "invalid authorization header format",
+			})
+		}
+
+		tokenString := parts[1]
+
+		claims, err := jwtCfg.ValidateToken(tokenString)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "invalid or expired token",
+			})
+		}
+
+		c.Locals("user_id", claims.UserID)
+		c.Locals("login", claims.Login)
+		c.Locals("role", claims.Role)
+
+		return c.Next()
+	}
+}
+
+func AdminOnlyMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		role, ok := c.Locals("role").(string)
+		if !ok || role != "admin" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "admin access required",
+			})
+		}
+		return c.Next()
+	}
+}
+
+func OptionalJWTAuthMiddleware(jwtCfg *auth.JWTConfig) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.Next()
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			return c.Next()
+		}
+
+		tokenString := parts[1]
+
+		claims, err := jwtCfg.ValidateToken(tokenString)
+		if err == nil {
+			c.Locals("user_id", claims.UserID)
+			c.Locals("login", claims.Login)
+			c.Locals("role", claims.Role)
+		}
+
+		return c.Next()
+	}
+}
+
+==========================================
+ФАЙЛ: internal/http/middlewares/logging.go
+==========================================
+
+package middlewares
+
+import (
+	"encoding/json"
+	"fmt"
+	"interslavic/logging"
+	"net/http"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type RequestInfo struct {
+	Route   string              `json:"route"`
+	Headers map[string][]string `json:"headers"`
+	Body    string              `json:"body"`
+}
+
+type ResponseInfo struct {
+	Status int    `json:"status"`
+	Body   string `json:"body"`
+}
+
+// NewMiddleware return request logging handler
+func NewLoggingMiddleware(logger *logging.ModuleLogger) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Method() == http.MethodOptions {
+			return c.Next()
+		}
+
+		reqInfoJson, err := json.Marshal(&RequestInfo{
+			Route:   c.OriginalURL(),
+			Headers: c.GetReqHeaders(),
+			Body:    string(c.Body()),
+		})
+		if err != nil {
+			logger.Error(fmt.Sprintf("error convert json req info: %s", err))
+			return c.Next()
+		}
+
+		logger.Info("REQUEST " + string(reqInfoJson))
+
+		return c.Next()
+	}
 }
 
 
@@ -598,6 +5075,7 @@ type Lesson struct {
 	Title      string `json:"title" db:"title"`
 	Content    string `json:"content" db:"content"`
 	Multimedia string `json:"multimedia" db:"multimedia"`
+	Position   int    `json:"position" db:"position"`
 }
 
 
@@ -653,16 +5131,385 @@ import "time"
 
 // User - модель пользователя
 type User struct {
-	ID        int       `json:"id" db:"id"`
-	Fullname  string    `json:"fullname" db:"fullname"`
-	Email     string    `json:"email" db:"email"`
-	Login     string    `json:"login" db:"login"`
-	Password  string    `json:"-" db:"password"` // "-" скрывает поле при JSON сериализации
-	Role      string    `json:"role" db:"role"`
-	RegDate   time.Time `json:"reg_date" db:"reg_date"`
-	LastLogin time.Time `json:"last_login" db:"last_login"`
+	ID        int        `json:"id" db:"id"`
+	Fullname  string     `json:"fullname" db:"fullname"`
+	Email     string     `json:"email" db:"email"`
+	Login     string     `json:"login" db:"login"`
+	Password  string     `json:"-" db:"password"` // "-" скрывает поле при JSON сериализации
+	Role      string     `json:"role" db:"role"`
+	RegDate   time.Time  `json:"reg_date" db:"reg_date"`
+	LastLogin *time.Time `json:"last_login" db:"last_login"`
 }
 
+
+==========================================
+ФАЙЛ: internal/usecases/auth_usecase.go
+==========================================
+
+package usecases
+
+import (
+	"context"
+	"errors"
+	"interslavic/internal/auth"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+	"interslavic/logging"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+type AuthUseCase struct {
+	userRepo database.UserRepository
+	jwtCfg   *auth.JWTConfig
+	logger   *logging.ModuleLogger
+}
+
+func NewAuthUseCase(
+	userRepo database.UserRepository,
+	jwtCfg *auth.JWTConfig,
+	logger *logging.ModuleLogger,
+) *AuthUseCase {
+	return &AuthUseCase{
+		userRepo: userRepo,
+		jwtCfg:   jwtCfg,
+		logger:   logging.NewModuleLogger("AUTH", "USECASE", logger),
+	}
+}
+
+type LoginRequest struct {
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}
+
+type RegisterRequest struct {
+	Fullname string `json:"fullname"`
+	Email    string `json:"email"`
+	Login    string `json:"login"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
+type AuthResponse struct {
+	User      *models.User    `json:"user"`
+	TokenPair *auth.TokenPair `json:"tokens"`
+}
+
+func (uc *AuthUseCase) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, error) {
+	user, err := uc.userRepo.FindByLogin(ctx, req.Login)
+	if err != nil {
+		uc.logger.Error("user not found", logging.ErrAttr(err))
+		return nil, errors.New("invalid user")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		uc.logger.Error("invalid password", logging.ErrAttr(err))
+		return nil, errors.New("invalid password")
+	}
+
+	tokenPair, err := uc.jwtCfg.GenerateTokenPair(user.ID, user.Login, user.Role)
+	if err != nil {
+		uc.logger.Error("failed to generate tokens", logging.ErrAttr(err))
+		return nil, errors.New("internal server error")
+	}
+
+	if err := uc.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
+		uc.logger.Error("failed to update last login", logging.ErrAttr(err))
+	}
+
+	user.Password = ""
+
+	return &AuthResponse{
+		User:      user,
+		TokenPair: tokenPair,
+	}, nil
+}
+
+func (uc *AuthUseCase) Register(ctx context.Context, req *RegisterRequest) (*AuthResponse, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		uc.logger.Error("failed to hash password", logging.ErrAttr(err))
+		return nil, errors.New("internal server error")
+	}
+
+	role := req.Role
+	if role == "" {
+		role = "student"
+	}
+
+	user := &models.User{
+		Fullname: req.Fullname,
+		Email:    req.Email,
+		Login:    req.Login,
+		Password: string(hashedPassword),
+		Role:     role,
+	}
+
+	if err := uc.userRepo.Create(ctx, user); err != nil {
+		uc.logger.Error("failed to create user", logging.ErrAttr(err))
+		return nil, errors.New("user with this login or email already exists")
+	}
+
+	tokenPair, err := uc.jwtCfg.GenerateTokenPair(user.ID, user.Login, user.Role)
+	if err != nil {
+		uc.logger.Error("failed to generate tokens", logging.ErrAttr(err))
+		return nil, errors.New("internal server error")
+	}
+
+	user.Password = ""
+
+	return &AuthResponse{
+		User:      user,
+		TokenPair: tokenPair,
+	}, nil
+}
+
+func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshToken string) (*auth.TokenPair, error) {
+	claims, err := uc.jwtCfg.ValidateToken(refreshToken)
+	if err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	user, err := uc.userRepo.FindByID(ctx, claims.UserID)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+
+	tokenPair, err := uc.jwtCfg.GenerateTokenPair(user.ID, user.Login, user.Role)
+	if err != nil {
+		return nil, errors.New("failed to generate tokens")
+	}
+
+	return tokenPair, nil
+}
+
+func (uc *AuthUseCase) GetUserByID(ctx context.Context, userID int) (*models.User, error) {
+	user, err := uc.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+
+	return user, nil
+}
+
+
+==========================================
+ФАЙЛ: internal/usecases/course_usecase.go
+==========================================
+
+package usecases
+
+import (
+	"context"
+	"errors"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+	"interslavic/logging"
+)
+
+type CourseUseCase struct {
+	courseRepo database.CourseRepository
+	logger     *logging.ModuleLogger
+}
+
+func NewCourseUseCase(
+	courseRepo database.CourseRepository,
+	logger *logging.ModuleLogger,
+) *CourseUseCase {
+	return &CourseUseCase{
+		courseRepo: courseRepo,
+		logger:     logging.NewModuleLogger("COURSE", "USECASE", logger),
+	}
+}
+
+func (uc *CourseUseCase) GetAllCourses(ctx context.Context) ([]models.Course, error) {
+	courses, err := uc.courseRepo.FindAll(ctx)
+	if err != nil {
+		uc.logger.Error("failed to get courses", logging.ErrAttr(err))
+		return nil, errors.New("failed to get courses")
+	}
+	return courses, nil
+}
+
+func (uc *CourseUseCase) GetCourseByID(ctx context.Context, id int) (*models.Course, error) {
+	course, err := uc.courseRepo.FindByID(ctx, id)
+	if err != nil {
+		uc.logger.Error("failed to get course", logging.ErrAttr(err))
+		return nil, errors.New("failed to get course")
+	}
+	if course == nil {
+		return nil, errors.New("course not found")
+	}
+	return course, nil
+}
+
+==========================================
+ФАЙЛ: internal/usecases/lessons_usecase.go
+==========================================
+
+package usecases
+
+import (
+	"context"
+	"errors"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+	"interslavic/logging"
+)
+
+type LessonUseCase struct {
+	lessonRepo database.LessonRepository
+	taskRepo   database.TaskRepository
+	logger     *logging.ModuleLogger
+}
+
+func NewLessonUseCase(
+	lessonRepo database.LessonRepository,
+	taskRepo database.TaskRepository,
+	logger *logging.ModuleLogger,
+) *LessonUseCase {
+	return &LessonUseCase{
+		lessonRepo: lessonRepo,
+		taskRepo:   taskRepo,
+		logger:     logging.NewModuleLogger("LESSON", "USECASE", logger),
+	}
+}
+
+func (uc *LessonUseCase) GetLessonByID(ctx context.Context, id int) (*models.Lesson, error) {
+	lesson, err := uc.lessonRepo.FindByID(ctx, id)
+	if err != nil {
+		uc.logger.Error("failed to get lesson", logging.ErrAttr(err))
+		return nil, errors.New("failed to get lesson")
+	}
+	if lesson == nil {
+		return nil, errors.New("lesson not found")
+	}
+	return lesson, nil
+}
+
+func (uc *LessonUseCase) GetLessonsByCourseID(ctx context.Context, courseID int) ([]models.Lesson, error) {
+	lessons, err := uc.lessonRepo.FindByCourseID(ctx, courseID)
+	if err != nil {
+		uc.logger.Error("failed to get lessons", logging.ErrAttr(err))
+		return nil, errors.New("failed to get lessons")
+	}
+	return lessons, nil
+}
+
+type LessonWithTasks struct {
+	Lesson models.Lesson `json:"lesson"`
+	Tasks  []models.Task `json:"tasks"`
+}
+
+func (uc *LessonUseCase) GetLessonWithTasks(ctx context.Context, lessonID int) (*LessonWithTasks, error) {
+	lesson, err := uc.GetLessonByID(ctx, lessonID)
+	if err != nil {
+		return nil, err
+	}
+
+	tasks, err := uc.taskRepo.FindByLessonID(ctx, lessonID)
+	if err != nil {
+		uc.logger.Error("failed to get tasks", logging.ErrAttr(err))
+		return nil, errors.New("failed to get tasks")
+	}
+
+	// Скрываем ответы для заданий с выбором ответа
+	for i := range tasks {
+		if tasks[i].TaskType == models.ChoisesTask {
+			tasks[i].Answer = ""
+		}
+	}
+
+	return &LessonWithTasks{
+		Lesson: *lesson,
+		Tasks:  tasks,
+	}, nil
+}
+
+==========================================
+ФАЙЛ: internal/usecases/task_usecase.go
+==========================================
+
+package usecases
+
+import (
+	"context"
+	"errors"
+	"interslavic/internal/database"
+	"interslavic/internal/models"
+	"interslavic/logging"
+)
+
+type TaskUseCase struct {
+	taskRepo database.TaskRepository
+	logger   *logging.ModuleLogger
+}
+
+func NewTaskUseCase(
+	taskRepo database.TaskRepository,
+	logger *logging.ModuleLogger,
+) *TaskUseCase {
+	return &TaskUseCase{
+		taskRepo: taskRepo,
+		logger:   logging.NewModuleLogger("TASK", "USECASE", logger),
+	}
+}
+
+func (uc *TaskUseCase) GetTasksByLessonID(ctx context.Context, lessonID int) ([]models.Task, error) {
+	tasks, err := uc.taskRepo.FindByLessonID(ctx, lessonID)
+	if err != nil {
+		uc.logger.Error("failed to get tasks", logging.ErrAttr(err))
+		return nil, errors.New("failed to get tasks")
+	}
+
+	// Скрываем ответы для заданий с выбором ответа
+	for i := range tasks {
+		if tasks[i].TaskType == models.ChoisesTask {
+			tasks[i].Answer = ""
+		}
+	}
+
+	return tasks, nil
+}
+
+type CheckAnswerRequest struct {
+	TaskID int    `json:"task_id"`
+	Answer string `json:"answer"`
+}
+
+type CheckAnswerResponse struct {
+	IsCorrect bool   `json:"is_correct"`
+	Message   string `json:"message,omitempty"`
+}
+
+func (uc *TaskUseCase) CheckAnswer(ctx context.Context, taskID int, answer string) (*CheckAnswerResponse, error) {
+	task, err := uc.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		uc.logger.Error("failed to find task", logging.ErrAttr(err))
+		return nil, errors.New("task not found")
+	}
+	if task == nil {
+		return nil, errors.New("task not found")
+	}
+
+	isCorrect, err := uc.taskRepo.CheckAnswer(ctx, taskID, answer)
+	if err != nil {
+		uc.logger.Error("failed to check answer", logging.ErrAttr(err))
+		return nil, errors.New("failed to check answer")
+	}
+
+	response := &CheckAnswerResponse{
+		IsCorrect: isCorrect,
+	}
+
+	if isCorrect {
+		response.Message = "Correct answer!"
+	} else {
+		response.Message = "Incorrect answer. Try again!"
+	}
+
+	return response, nil
+}
 
 ==========================================
 ФАЙЛ: logging/config.go
@@ -911,7 +5758,7 @@ func ProvideFXMLoggers(cfg *config.Config) (*BaseLogger, *ModuleLogger) {
 	loggingCfg := NewLoggingConfig(cfg.Logging.Enable, cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.SavingDays)
 	bl := NewBaseLogger(string("1.0.0"), cfg.Logging.Dir, loggingCfg)
 
-	ml := NewModuleLogger("DRIVER", "SERVER", bl)
+	ml := NewModuleLogger("INTERSLAVIC", "APP", bl)
 
 	return bl, ml
 }
