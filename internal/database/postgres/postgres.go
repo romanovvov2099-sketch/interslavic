@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"interslavic/config"
 	"interslavic/logging"
 	"time"
@@ -30,70 +29,6 @@ func NewPostgres(cfg *config.Config, logger *logging.ModuleLogger) *sql.DB {
 	db.SetMaxIdleConns(10)
 
 	return db
-}
-
-type PostgresTrManager struct {
-	db        *sql.DB
-	currentTr Transaction
-}
-
-func NewPostgresTrManager(db *sql.DB) *PostgresTrManager {
-	return &PostgresTrManager{
-		db: db,
-	}
-}
-
-type txKey struct{}
-
-func (m *PostgresTrManager) Begin(ctx context.Context) (context.Context, error) {
-	tx, err := m.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-
-	if m.currentTr != nil {
-		return nil, errors.New("previous transaction still exists")
-	}
-
-	m.currentTr = &sqlTransaction{tx: tx, active: true}
-
-	return context.WithValue(ctx, txKey{}, tx), nil
-}
-
-func (m *PostgresTrManager) Commit(ctx context.Context) error {
-	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
-		return tx.Commit()
-	}
-
-	m.currentTr = nil
-
-	return nil
-}
-
-func (m *PostgresTrManager) Rollback(ctx context.Context) error {
-	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
-		return tx.Rollback()
-	}
-
-	m.currentTr = nil
-
-	return nil
-}
-
-func (m *PostgresTrManager) GetCurrentTr(ctx context.Context) *sql.Tx {
-	if tx, ok := ctx.Value(txKey{}).(*sql.Tx); ok {
-		return tx
-	}
-
-	m.currentTr = nil
-
-	return nil
-}
-
-type Transaction interface {
-	IsActive() bool
-	Commit(context.Context) error
-	Rollback(context.Context) error
 }
 
 type sqlTransaction struct {

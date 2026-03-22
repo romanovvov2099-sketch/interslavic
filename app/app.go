@@ -13,7 +13,6 @@ import (
 
 func New() *fx.App {
 	return fx.New(
-
 		// base setup application
 		fx.Provide(
 			config.New,

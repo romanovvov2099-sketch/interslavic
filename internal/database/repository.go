@@ -2,18 +2,8 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"interslavic/internal/models"
 )
-
-// [SERVICE INTERFACES]
-
-type TrManager interface {
-	Begin(context.Context) (context.Context, error)
-	Commit(context.Context) error
-	Rollback(context.Context) error
-	GetCurrentTr(context.Context) *sql.Tx
-}
 
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error

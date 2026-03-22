@@ -1,6 +1,5 @@
 http:
   port: 5007
-  authorization: "test_auth"
 
 database: 
   url: "postgres://interslavic:interslavic@interslavic-db:5432/interslavic?sslmode=disable"

@@ -16,7 +16,6 @@ services:
           - '5007:5007'
       volumes:
           - .docker/config/config.yaml:/opt/interslavic/config.yaml
-          - .docker/applications:/opt/interslavic/applications
       networks:
           - intranet
 
